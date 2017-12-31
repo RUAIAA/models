@@ -191,7 +191,7 @@ class FasterRCNNMetaArch(model.DetectionModel):
 
   def __init__(self,
                is_training,
-               num_classes,
+               classes,
                image_resizer_fn,
                feature_extractor,
                first_stage_only,
@@ -226,7 +226,9 @@ class FasterRCNNMetaArch(model.DetectionModel):
     Args:
       is_training: A boolean indicating whether the training version of the
         computation graph should be constructed.
-      num_classes: Number of classes.  Note that num_classes *does not*
+      classes: list of dicts containing info about each multi-task class
+        {'name':'class_name','num':'number of classes','has_background':'whether should contain background class'}
+        Note that num *does not*
         include the background category, so if groundtruth labels take values
         in {0, 1, .., K-1}, num_classes=K (and not K+1, even though the
         assigned classification targets can range from {0,... K}).
@@ -320,7 +322,7 @@ class FasterRCNNMetaArch(model.DetectionModel):
       ValueError: If first_stage_anchor_generator is not of type
         grid_anchor_generator.GridAnchorGenerator.
     """
-    super(FasterRCNNMetaArch, self).__init__(num_classes=num_classes)
+    super(FasterRCNNMetaArch, self).__init__(classes=classes)
 
     if is_training and second_stage_batch_size > first_stage_max_proposals:
       raise ValueError('second_stage_batch_size should be no greater than '
@@ -336,10 +338,14 @@ class FasterRCNNMetaArch(model.DetectionModel):
     self._first_stage_only = first_stage_only
 
     # The first class is reserved as background.
-    unmatched_cls_target = tf.constant(
-        [1] + self._num_classes * [0], dtype=tf.float32)
+    #unmatched_cls_target = tf.constant(
+    #    [1] + self._num_classes * [0], dtype=tf.float32)
+
     self._proposal_target_assigner = target_assigner.create_target_assigner(
         'FasterRCNN', 'proposal')
+
+    unmatched_cls_target = {c.name: tf.constant(
+        [1] + c.num * [0], dtype=tf.float32) for c in self._classes}
     self._detector_target_assigner = target_assigner.create_target_assigner(
         'FasterRCNN', 'detection', unmatched_cls_target=unmatched_cls_target)
     # Both proposal and detector target assigners use the same box coder
@@ -357,7 +363,7 @@ class FasterRCNNMetaArch(model.DetectionModel):
     self._first_stage_sampler = sampler.BalancedPositiveNegativeSampler(
         positive_fraction=first_stage_positive_balance_fraction)
     self._first_stage_box_predictor = box_predictor.ConvolutionalBoxPredictor(
-        self._is_training, num_classes=1,
+        self._is_training, classes=[{'name':'Objectness','num':1,'has_background':True}],
         conv_hyperparams=self._first_stage_box_predictor_arg_scope,
         min_depth=0, max_depth=0, num_layers_before_predictor=0,
         use_dropout=False, dropout_keep_prob=1.0, kernel_size=1,
@@ -527,6 +533,7 @@ class FasterRCNNMetaArch(model.DetectionModel):
           [total_num_padded_proposals, num_classes, mask_height, mask_width]
           containing instance mask predictions.
     """
+
     (rpn_box_predictor_features, rpn_features_to_crop, anchors_boxlist,
      image_shape) = self._extract_rpn_feature_maps(preprocessed_inputs)
     (rpn_box_encodings, rpn_objectness_predictions_with_background
@@ -617,6 +624,7 @@ class FasterRCNNMetaArch(model.DetectionModel):
           [total_num_padded_proposals, num_classes, mask_height, mask_width]
           containing instance mask predictions.
     """
+
     proposal_boxes_normalized, _, num_proposals = self._postprocess_rpn(
         rpn_box_encodings, rpn_objectness_predictions_with_background,
         anchors, image_shape)
@@ -636,8 +644,9 @@ class FasterRCNNMetaArch(model.DetectionModel):
         scope=self.second_stage_box_predictor_scope)
     refined_box_encodings = tf.squeeze(
         box_predictions[box_predictor.BOX_ENCODINGS], axis=1)
-    class_predictions_with_background = tf.squeeze(box_predictions[
-        box_predictor.CLASS_PREDICTIONS_WITH_BACKGROUND], axis=1)
+
+    class_predictions_with_background = {k:tf.squeeze(v, axis=1) for k,v in box_predictions[
+        box_predictor.CLASS_PREDICTIONS_WITH_BACKGROUND].items()}
 
     absolute_proposal_boxes = ops.normalized_to_image_coordinates(
         proposal_boxes_normalized, image_shape, self._parallel_iterations)
@@ -724,9 +733,11 @@ class FasterRCNNMetaArch(model.DetectionModel):
     """
     num_anchors_per_location = (
         self._first_stage_anchor_generator.num_anchors_per_location())
+
     if len(num_anchors_per_location) != 1:
       raise RuntimeError('anchor_generator is expected to generate anchors '
                          'corresponding to a single feature map.')
+
     box_predictions = self._first_stage_box_predictor.predict(
         rpn_box_predictor_features,
         num_anchors_per_location[0],
@@ -782,8 +793,9 @@ class FasterRCNNMetaArch(model.DetectionModel):
           dtype=tf.float32,
           parallel_iterations=self._parallel_iterations,
           back_prop=True)
+
     return (_batch_gather_kept_indices(box_encodings),
-            _batch_gather_kept_indices(objectness_predictions_with_background),
+            _batch_gather_kept_indices(objectness_predictions_with_background[0]['Objectness']),
             pruned_anchors_boxlist)
 
   def _flatten_first_two_dimensions(self, inputs):
@@ -1004,6 +1016,7 @@ class FasterRCNNMetaArch(model.DetectionModel):
       single_image_boxlist = box_list.BoxList(single_image_proposal_boxes)
       single_image_boxlist.add_field(fields.BoxListFields.scores,
                                      single_image_proposal_scores)
+
       sampled_boxlist = self._sample_box_classifier_minibatch(
           single_image_boxlist,
           single_image_groundtruth_boxlist,
@@ -1048,16 +1061,25 @@ class FasterRCNNMetaArch(model.DetectionModel):
         shape [num_boxes, image_height, image_width] containing instance masks.
         This is set to None if no masks exist in the provided groundtruth.
     """
+
     groundtruth_boxlists = [
         box_list_ops.to_absolute_coordinates(
             box_list.BoxList(boxes), image_shape[1], image_shape[2])
         for boxes in self.groundtruth_lists(fields.BoxListFields.boxes)]
+
+    has_background = {c.name:c.has_background for c in self._classes}
+    groundtruth_classes_with_background_list = [{
+            k: tf.to_float(tf.pad(v, [[0, 0], [1, 0]], mode='CONSTANT')) if has_background[k] else \
+                tf.to_float(v) for k,v in groundtruth_class.items()
+
+    } for groundtruth_class in self.groundtruth_lists(fields.BoxListFields.classes)]
+    """
     groundtruth_classes_with_background_list = [
         tf.to_float(
             tf.pad(one_hot_encoding, [[0, 0], [1, 0]], mode='CONSTANT'))
         for one_hot_encoding in self.groundtruth_lists(
             fields.BoxListFields.classes)]
-
+    """
     groundtruth_masks_list = self._groundtruth_lists.get(
         fields.BoxListFields.masks)
     if groundtruth_masks_list is not None:
@@ -1095,6 +1117,7 @@ class FasterRCNNMetaArch(model.DetectionModel):
     Returns:
       a BoxList contained sampled proposals.
     """
+
     (cls_targets, cls_weights, _, _, _) = self._detector_target_assigner.assign(
         proposal_boxlist, groundtruth_boxlist,
         groundtruth_classes_with_background)
@@ -1103,7 +1126,13 @@ class FasterRCNNMetaArch(model.DetectionModel):
     # are ignored. If triggered, the selected boxes will still be ignored
     # during loss computation.
     cls_weights += tf.to_float(tf.equal(tf.reduce_sum(cls_weights), 0))
-    positive_indicator = tf.greater(tf.argmax(cls_targets, axis=1), 0)
+    cls_target = None
+    for c in self._classes:
+        if c.has_background:
+            cls_target = cls_targets[c.name]
+            break
+
+    positive_indicator = tf.greater(tf.argmax(cls_target, axis=1), 0)
     sampled_indices = self._second_stage_sampler.subsample(
         tf.cast(cls_weights, tf.bool),
         self._second_stage_batch_size,
@@ -1365,7 +1394,7 @@ class FasterRCNNMetaArch(model.DetectionModel):
           tf.to_int32(batch_cls_targets), depth=2)
       sampled_reg_indices = tf.multiply(batch_sampled_indices,
                                         batch_reg_weights)
-
+      import pdb;pdb.set_trace()
       localization_losses = self._first_stage_localization_loss(
           rpn_box_encodings, batch_reg_targets, weights=sampled_reg_indices)
       objectness_losses = self._first_stage_objectness_loss(
@@ -1465,25 +1494,29 @@ class FasterRCNNMetaArch(model.DetectionModel):
       # We only predict refined location encodings for the non background
       # classes, but we now pad it to make it compatible with the class
       # predictions
-      flat_cls_targets_with_background = tf.reshape(
-          batch_cls_targets_with_background,
-          [batch_size * self.max_num_proposals, -1])
+
+      flat_cls_targets_with_background = {k:tf.reshape(
+          v,[batch_size * self.max_num_proposals, -1]) for k,v in batch_cls_targets_with_background.items()}
       refined_box_encodings_with_background = tf.pad(
           refined_box_encodings, [[0, 0], [1, 0], [0, 0]])
       # For anchors with multiple labels, picks refined_location_encodings
       # for just one class to avoid over-counting for regression loss and
       # (optionally) mask loss.
-      one_hot_flat_cls_targets_with_background = tf.argmax(
-          flat_cls_targets_with_background, axis=1)
-      one_hot_flat_cls_targets_with_background = tf.one_hot(
-          one_hot_flat_cls_targets_with_background,
-          flat_cls_targets_with_background.get_shape()[1])
-      refined_box_encodings_masked_by_class_targets = tf.boolean_mask(
-          refined_box_encodings_with_background,
-          tf.greater(one_hot_flat_cls_targets_with_background, 0))
-      class_predictions_with_background = tf.reshape(
-          class_predictions_with_background,
-          [batch_size, self.max_num_proposals, -1])
+      one_hot_flat_cls_targets_with_background = {k:tf.argmax(
+          v, axis=1) for k,v in flat_cls_targets_with_background.items()}
+      one_hot_flat_cls_targets_with_background = {k:tf.one_hot(
+          v,flat_cls_targets_with_background[k].get_shape()[1]) for k,v in one_hot_flat_cls_targets_with_background.items()}
+      refined_box_encodings_masked_by_class_targets = None
+      for c in self._classes:
+          if c.associated_with_box_codings:
+              refined_box_encodings_masked_by_class_targets = tf.boolean_mask(
+                  refined_box_encodings_with_background,
+                  tf.greater(one_hot_flat_cls_targets_with_background[c.name], 0))
+              break
+      if refined_box_encodings_masked_by_class_targets  is None:
+           raise ValueError('At least one class must be associated with box encodings!')
+      class_predictions_with_background = {k:tf.reshape(
+          v,[batch_size, self.max_num_proposals, -1]) for k,v in class_predictions_with_background.items()}
       reshaped_refined_box_encodings = tf.reshape(
           refined_box_encodings_masked_by_class_targets,
           [batch_size, -1, 4])
@@ -1491,6 +1524,7 @@ class FasterRCNNMetaArch(model.DetectionModel):
       second_stage_loc_losses = self._second_stage_localization_loss(
           reshaped_refined_box_encodings,
           batch_reg_targets, weights=batch_reg_weights) / normalizer
+
       second_stage_cls_losses = self._second_stage_classification_loss(
           class_predictions_with_background,
           batch_cls_targets_with_background,

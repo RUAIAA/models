@@ -140,16 +140,26 @@ class TargetAssigner(object):
       groundtruth_labels = tf.ones(tf.expand_dims(groundtruth_boxes.num_boxes(),
                                                   0))
       groundtruth_labels = tf.expand_dims(groundtruth_labels, -1)
-    unmatched_shape_assert = tf.assert_equal(
-        tf.shape(groundtruth_labels)[1:], tf.shape(self._unmatched_cls_target),
-        message='Unmatched class target shape incompatible '
-        'with groundtruth labels shape!')
-    labels_and_box_shapes_assert = tf.assert_equal(
-        tf.shape(groundtruth_labels)[0], groundtruth_boxes.num_boxes(),
-        message='Groundtruth boxes and labels have incompatible shapes!')
+
+    if isinstance(groundtruth_labels,dict):
+        unmatched_shape_assert = [ tf.assert_equal(
+            tf.shape(v)[1:], tf.shape(self._unmatched_cls_target[k]),
+            message='Unmatched class target shape incompatible '
+            'with groundtruth labels shape!') for k,v in groundtruth_labels.items()]
+        labels_and_box_shapes_assert = [ tf.assert_equal(
+            tf.shape(groundtruth_labels[k])[0], groundtruth_boxes.num_boxes(),
+            message='Groundtruth boxes and labels have incompatible shapes!') for k in groundtruth_labels.keys()]
+    else:
+        unmatched_shape_assert = [tf.assert_equal(
+            tf.shape(groundtruth_labels)[1:], tf.shape(self._unmatched_cls_target),
+            message='Unmatched class target shape incompatible '
+            'with groundtruth labels shape!')]
+        labels_and_box_shapes_assert = [tf.assert_equal(
+            tf.shape(groundtruth_labels)[0], groundtruth_boxes.num_boxes(),
+            message='Groundtruth boxes and labels have incompatible shapes!')]
 
     with tf.control_dependencies(
-        [unmatched_shape_assert, labels_and_box_shapes_assert]):
+        (unmatched_shape_assert+labels_and_box_shapes_assert)):
       match_quality_matrix = self._similarity_calc.compare(groundtruth_boxes,
                                                            anchors)
       match = self._matcher.match(match_quality_matrix, **params)
@@ -182,9 +192,16 @@ class TargetAssigner(object):
     Returns:
       A tensor with the shape info filled in.
     """
-    target_shape = target.get_shape().as_list()
-    target_shape[0] = num_anchors
-    target.set_shape(target_shape)
+
+    if isinstance(target,dict):
+        for v in target.values():
+            target_shape = v.get_shape().as_list()
+            target_shape[0] = num_anchors
+            v.set_shape(target_shape)
+    else:
+        target_shape = target.get_shape().as_list()
+        target_shape[0] = num_anchors
+        target.set_shape(target_shape)
     return target
 
   def _create_regression_targets(self, anchors, groundtruth_boxes, match):
@@ -198,6 +215,7 @@ class TargetAssigner(object):
     Returns:
       reg_targets: a float32 tensor with shape [N, box_code_dimension]
     """
+    import pdb;pdb.set_trace()
     matched_anchor_indices = match.matched_column_indices()
     unmatched_ignored_anchor_indices = (match.
                                         unmatched_or_ignored_column_indices())
@@ -249,20 +267,31 @@ class TargetAssigner(object):
         where the subshape [d_1, ..., d_k] is compatible with groundtruth_labels
         which has shape [num_gt_boxes, d_1, d_2, ... d_k].
     """
+
     matched_anchor_indices = match.matched_column_indices()
     unmatched_ignored_anchor_indices = (match.
                                         unmatched_or_ignored_column_indices())
     matched_gt_indices = match.matched_row_indices()
-    matched_cls_targets = tf.gather(groundtruth_labels, matched_gt_indices)
+    if isinstance(groundtruth_labels,dict):
+        matched_cls_targets = { k: tf.gather(v, matched_gt_indices) for k,v in groundtruth_labels.items()}
+        unmatched_ignored_cls_targets = {k: tf.tile(
+            tf.expand_dims(v, 0),
+            tf.stack([tf.size(unmatched_ignored_anchor_indices)] + v.shape.ndims*[1])) for k,v in self._unmatched_cls_target.items()}
+        #separate k,v for each class attribute
+        cls_targets = {k : tf.dynamic_stitch(
+            [matched_anchor_indices, unmatched_ignored_anchor_indices],
+            [v, unmatched_ignored_cls_targets[k]]) for k,v in matched_cls_targets.items() }
+    else:
+        matched_cls_targets = tf.gather(groundtruth_labels,matched_gt_indices)
+        ones = self._unmatched_cls_target.shape.ndims * [1]
+        unmatched_ignored_cls_targets = tf.tile(
+            tf.expand_dims(self._unmatched_cls_target, 0),
+            tf.stack([tf.size(unmatched_ignored_anchor_indices)] + ones))
 
-    ones = self._unmatched_cls_target.shape.ndims * [1]
-    unmatched_ignored_cls_targets = tf.tile(
-        tf.expand_dims(self._unmatched_cls_target, 0),
-        tf.stack([tf.size(unmatched_ignored_anchor_indices)] + ones))
+        cls_targets = tf.dynamic_stitch(
+            [matched_anchor_indices, unmatched_ignored_anchor_indices],
+            [matched_cls_targets, unmatched_ignored_cls_targets])
 
-    cls_targets = tf.dynamic_stitch(
-        [matched_anchor_indices, unmatched_ignored_anchor_indices],
-        [matched_cls_targets, unmatched_ignored_cls_targets])
     return cls_targets
 
   def _create_regression_weights(self, match):
@@ -447,7 +476,11 @@ def batch_assign_targets(target_assigner,
     reg_targets_list.append(reg_targets)
     reg_weights_list.append(reg_weights)
     match_list.append(match)
-  batch_cls_targets = tf.stack(cls_targets_list)
+
+  if isinstance(cls_targets_list[0],dict):
+      batch_cls_targets = {k: tf.stack([v]) for k,v in cls_targets_list[0].items()}
+  else:
+      batch_cls_targets = tf.stack(cls_targets_list)
   batch_cls_weights = tf.stack(cls_weights_list)
   batch_reg_targets = tf.stack(reg_targets_list)
   batch_reg_weights = tf.stack(reg_weights_list)

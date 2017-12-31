@@ -19,7 +19,7 @@ from object_detection.core import box_predictor
 from object_detection.protos import box_predictor_pb2
 
 
-def build(argscope_fn, box_predictor_config, is_training, num_classes):
+def build(argscope_fn, box_predictor_config, is_training, classes):
   """Builds box predictor based on the configuration.
 
   Builds box predictor based on the configuration. See box_predictor.proto for
@@ -33,7 +33,7 @@ def build(argscope_fn, box_predictor_config, is_training, num_classes):
     box_predictor_config: box_predictor_pb2.BoxPredictor proto containing
       configuration.
     is_training: Whether the models is in training mode.
-    num_classes: Number of classes to predict.
+    classes: list of dicts [ {name:'class_name',num:'number of classes'},...]
 
   Returns:
     box_predictor: box_predictor.BoxPredictor object.
@@ -53,7 +53,7 @@ def build(argscope_fn, box_predictor_config, is_training, num_classes):
                                    is_training)
     box_predictor_object = box_predictor.ConvolutionalBoxPredictor(
         is_training=is_training,
-        num_classes=num_classes,
+        classes=classes,
         conv_hyperparams=conv_hyperparams,
         min_depth=conv_box_predictor.min_depth,
         max_depth=conv_box_predictor.max_depth,
@@ -78,7 +78,7 @@ def build(argscope_fn, box_predictor_config, is_training, num_classes):
                                      is_training)
     box_predictor_object = box_predictor.MaskRCNNBoxPredictor(
         is_training=is_training,
-        num_classes=num_classes,
+        classes=classes,
         fc_hyperparams=fc_hyperparams,
         use_dropout=mask_rcnn_box_predictor.use_dropout,
         dropout_keep_prob=mask_rcnn_box_predictor.dropout_keep_probability,

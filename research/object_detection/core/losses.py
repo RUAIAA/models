@@ -331,15 +331,29 @@ class WeightedSoftmaxClassificationLoss(Loss):
     Returns:
       loss: a (scalar) tensor representing the value of the loss function
     """
-    num_classes = prediction_tensor.get_shape().as_list()[-1]
-    prediction_tensor = tf.divide(
-        prediction_tensor, self._logit_scale, name='scale_logit')
-    per_row_cross_ent = (tf.nn.softmax_cross_entropy_with_logits(
-        labels=tf.reshape(target_tensor, [-1, num_classes]),
-        logits=tf.reshape(prediction_tensor, [-1, num_classes])))
-    if self._anchorwise_output:
-      return tf.reshape(per_row_cross_ent, tf.shape(weights)) * weights
-    return tf.reduce_sum(per_row_cross_ent * tf.reshape(weights, [-1]))
+
+    if not isinstance(prediction_tensor,dict):
+        num_classes = prediction_tensor.get_shape().as_list()[-1]
+        prediction_tensor = tf.divide(
+            prediction_tensor, self._logit_scale, name='scale_logit')
+        per_row_cross_ent = (tf.nn.softmax_cross_entropy_with_logits(
+            labels=tf.reshape(target_tensor, [-1, num_classes]),
+            logits=tf.reshape(prediction_tensor, [-1, num_classes])))
+        if self._anchorwise_output:
+          return tf.reshape(per_row_cross_ent, tf.shape(weights)) * weights
+        return tf.reduce_sum(per_row_cross_ent * tf.reshape(weights, [-1]))
+    else:
+        combined_sum = 0
+        for k,v in prediction_tensor.items():
+            num_classes = v.get_shape().as_list()[-1]
+            prediction_tensor = tf.divide(
+                v, self._logit_scale, name='scale_logit')
+            per_row_cross_ent = (tf.nn.softmax_cross_entropy_with_logits(
+                labels=tf.reshape(target_tensor[k], [-1, num_classes]),
+                logits=tf.reshape(v, [-1, num_classes])))
+            combined_sum+=tf.reduce_sum(per_row_cross_ent * tf.reshape(weights, [-1]))
+        return combined_sum
+
 
 
 class BootstrappedSigmoidClassificationLoss(Loss):

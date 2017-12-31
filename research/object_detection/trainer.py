@@ -85,12 +85,12 @@ def create_input_queue(batch_size_per_clone, create_tensor_dict_fn,
   return input_queue
 
 
-def get_inputs(input_queue, num_classes, merge_multiple_label_boxes=False):
+def get_inputs(input_queue, classes, merge_multiple_label_boxes=False):
   """Dequeues batch and constructs inputs to object detection model.
 
   Args:
     input_queue: BatchQueue object holding enqueued tensor_dicts.
-    num_classes: Number of classes.
+    classes: list of dicts {name:'class name',num:'number of classes'...}
     merge_multiple_label_boxes: Whether to merge boxes with multiple labels
       or not. Defaults to false. Merged boxes are represented with a single
       box and a k-hot encoding of the multiple labels associated with the
@@ -118,15 +118,22 @@ def get_inputs(input_queue, num_classes, merge_multiple_label_boxes=False):
     if fields.InputDataFields.source_id in read_data:
       key = read_data[fields.InputDataFields.source_id]
     location_gt = read_data[fields.InputDataFields.groundtruth_boxes]
-    classes_gt = tf.cast(read_data[fields.InputDataFields.groundtruth_classes],
-                         tf.int32)
-    classes_gt -= label_id_offset
+    classes_gt = {}
+    for k,v in read_data.items():
+        if fields.InputDataFields.groundtruth_classes in k:
+            classes_gt[k] = tf.cast(v,tf.int32)
+            classes_gt[k]-= label_id_offset
+    #classes_gt = tf.cast(read_data[fields.InputDataFields.groundtruth_classes],
+    #                     tf.int32)
+    #classes_gt -= label_id_offset
     if merge_multiple_label_boxes:
       location_gt, classes_gt, _ = util_ops.merge_boxes_with_multiple_labels(
-          location_gt, classes_gt, num_classes)
+          location_gt, classes_gt)
     else:
-      classes_gt = util_ops.padded_one_hot_encoding(
-          indices=classes_gt, depth=num_classes, left_pad=0)
+      classes_gt = {c.name : util_ops.padded_one_hot_encoding(
+          indices=classes_gt[fields.InputDataFields.groundtruth_classes+'_'+c.name], depth=c.num, left_pad=0) for c in classes}
+      #classes_gt = util_ops.padded_one_hot_encoding(
+      #  indices=classes_gt, depth=num_classes, left_pad=0)
     masks_gt = read_data.get(fields.InputDataFields.groundtruth_instance_masks)
     keypoints_gt = read_data.get(fields.InputDataFields.groundtruth_keypoints)
     if (merge_multiple_label_boxes and (
@@ -149,8 +156,9 @@ def _create_losses(input_queue, create_model_fn, train_config):
   (images, _, groundtruth_boxes_list, groundtruth_classes_list,
    groundtruth_masks_list, groundtruth_keypoints_list) = get_inputs(
        input_queue,
-       detection_model.num_classes,
+       detection_model.classes,
        train_config.merge_multiple_label_boxes)
+
   images = [detection_model.preprocess(image) for image in images]
   images = tf.concat(images, 0)
   if any(mask is None for mask in groundtruth_masks_list):

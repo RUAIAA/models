@@ -15,6 +15,7 @@ package object_detection.protos;
 // 'groundtruth_instance_masks': (Optional), a [num_boxes, image_height,
 //    image_width] float tensor storing binary mask of the objects in boxes.
 
+
 message InputReader {
   // Path to StringIntLabelMap pbtxt file specifying the mapping from string
   // labels to integer ids.
@@ -45,6 +46,8 @@ message InputReader {
     TFRecordInputReader tf_record_input_reader = 8;
     ExternalInputReader external_input_reader = 9;
   }
+
+  repeated string multi_task_class_name = 10;
 }
 
 // An input reader that reads TF Example protos from local TFRecord files.

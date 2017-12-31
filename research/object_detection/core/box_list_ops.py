@@ -164,6 +164,7 @@ def prune_outside_window(boxlist, window, scope=None):
         tf.less(y_min, win_y_min), tf.less(x_min, win_x_min),
         tf.greater(y_max, win_y_max), tf.greater(x_max, win_x_max)
     ], 1)
+    import pdb;pdb.set_trace()
     valid_indices = tf.reshape(
         tf.where(tf.logical_not(tf.reduce_any(coordinate_violations, 1))), [-1])
     return gather(boxlist, valid_indices), valid_indices

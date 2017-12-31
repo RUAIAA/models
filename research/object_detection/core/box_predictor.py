@@ -42,22 +42,24 @@ MASK_PREDICTIONS = 'mask_predictions'
 class BoxPredictor(object):
   """BoxPredictor."""
 
-  def __init__(self, is_training, num_classes):
+  def __init__(self, is_training, classes):
     """Constructor.
 
     Args:
       is_training: Indicates whether the BoxPredictor is in training mode.
-      num_classes: number of classes.  Note that num_classes *does not*
+      classes: list of dicts containing info about each multi-task class
+        {'name':'class_name','num':'number of classes','has_background':'whether should contain background class'}
+        Note that num *does not*
         include the background category, so if groundtruth labels take values
         in {0, 1, .., K-1}, num_classes=K (and not K+1, even though the
         assigned classification targets can range from {0,... K}).
     """
     self._is_training = is_training
-    self._num_classes = num_classes
+    self._classes = classes
 
   @property
-  def num_classes(self):
-    return self._num_classes
+  def classes(self):
+    return self._classes
 
   def predict(self, image_features, num_predictions_per_location, scope,
               **params):
@@ -271,7 +273,7 @@ class MaskRCNNBoxPredictor(BoxPredictor):
 
   def __init__(self,
                is_training,
-               num_classes,
+               classes,
                fc_hyperparams,
                use_dropout,
                dropout_keep_prob,
@@ -286,7 +288,9 @@ class MaskRCNNBoxPredictor(BoxPredictor):
 
     Args:
       is_training: Indicates whether the BoxPredictor is in training mode.
-      num_classes: number of classes.  Note that num_classes *does not*
+      classes: list of dicts containing info about each multi-task class
+        {'name':'class_name','num':'number of classes','has_background':'whether should contain background class'}
+        Note that num *does not*
         include the background category, so if groundtruth labels take values
         in {0, 1, .., K-1}, num_classes=K (and not K+1, even though the
         assigned classification targets can range from {0,... K}).
@@ -312,7 +316,7 @@ class MaskRCNNBoxPredictor(BoxPredictor):
     Raises:
       ValueError: If predict_instance_masks or predict_keypoints is true.
     """
-    super(MaskRCNNBoxPredictor, self).__init__(is_training, num_classes)
+    super(MaskRCNNBoxPredictor, self).__init__(is_training, classes)
     self._fc_hyperparams = fc_hyperparams
     self._use_dropout = use_dropout
     self._box_code_size = box_code_size
@@ -331,8 +335,8 @@ class MaskRCNNBoxPredictor(BoxPredictor):
                        'masks.')
 
   @property
-  def num_classes(self):
-    return self._num_classes
+  def classes(self):
+    return self._classes
 
   def _predict(self, image_features, num_predictions_per_location):
     """Computes encoded object locations and corresponding confidences.
@@ -384,20 +388,43 @@ class MaskRCNNBoxPredictor(BoxPredictor):
                                               keep_prob=self._dropout_keep_prob,
                                               is_training=self._is_training)
     with slim.arg_scope(self._fc_hyperparams):
-      box_encodings = slim.fully_connected(
+      box_encodings = None
+      class_predictions_with_background = {}
+
+      for c in self._classes:
+        if isinstance(c,dict):
+            class_name = c['name']
+            has_background = c['has_background']
+            num_class_slots = c['num'] + int(has_background)
+        else:
+            class_name  = c.name
+            has_background = c.has_background
+            num_class_slots = c.num + int(has_background)
+        class_predictions = slim.fully_connected(
           flattened_image_features,
-          self._num_classes * self._box_code_size,
+          num_class_slots,
           activation_fn=None,
-          scope='BoxEncodingPredictor')
-      class_predictions_with_background = slim.fully_connected(
-          flattened_image_features,
-          self._num_classes + 1,
-          activation_fn=None,
-          scope='ClassPredictor')
+          scope='ClassPredictor_'+class_name)
+        class_predictions = tf.reshape(
+          class_predictions, [-1, 1, num_class_slots])
+        #only one class can be associated with the box codings
+        class_predictions_with_background[c.name] = class_predictions
+        if box_encodings is None and c.associated_with_box_codings:
+            if not has_background:
+                raise ValueError("Class %s associated with box_ecodings must have background class"%c.name)
+            num_classes_for_box_codings = num_class_slots-1
+
+            box_encodings = slim.fully_connected(
+                flattened_image_features,
+                num_classes_for_box_codings * self._box_code_size,
+                activation_fn=None,
+                scope='BoxEncodingPredictor')
+    if box_encodings is None:
+        raise ValueError('One Multi-task class must be associated with box_encodings!')
+
     box_encodings = tf.reshape(
-        box_encodings, [-1, 1, self._num_classes, self._box_code_size])
-    class_predictions_with_background = tf.reshape(
-        class_predictions_with_background, [-1, 1, self._num_classes + 1])
+        box_encodings, [-1, 1, num_classes_for_box_codings, self._box_code_size])
+
 
     predictions_dict = {
         BOX_ENCODINGS: box_encodings,
@@ -440,7 +467,7 @@ class ConvolutionalBoxPredictor(BoxPredictor):
 
   def __init__(self,
                is_training,
-               num_classes,
+               classes,
                conv_hyperparams,
                min_depth,
                max_depth,
@@ -455,10 +482,13 @@ class ConvolutionalBoxPredictor(BoxPredictor):
 
     Args:
       is_training: Indicates whether the BoxPredictor is in training mode.
-      num_classes: number of classes.  Note that num_classes *does not*
-        include the background category, so if groundtruth labels take values
-        in {0, 1, .., K-1}, num_classes=K (and not K+1, even though the
-        assigned classification targets can range from {0,... K}).
+       classes: list of dicts containing info about each multi-task class
+         {'name':'class_name','num':'number of classes','has_background':
+         'whether should contain background class'}
+         Note that num *does not*
+         include the background category, so if groundtruth labels take values
+         in {0, 1, .., K-1}, num_classes=K (and not K+1, even though the
+         assigned classification targets can range from {0,... K}).
       conv_hyperparams: Slim arg_scope with hyperparameters for convolution ops.
       min_depth: Minumum feature depth prior to predicting box encodings
         and class predictions.
@@ -483,7 +513,7 @@ class ConvolutionalBoxPredictor(BoxPredictor):
     Raises:
       ValueError: if min_depth > max_depth.
     """
-    super(ConvolutionalBoxPredictor, self).__init__(is_training, num_classes)
+    super(ConvolutionalBoxPredictor, self).__init__(is_training, classes)
     if min_depth > max_depth:
       raise ValueError('min_depth should be less than or equal to max_depth')
     self._conv_hyperparams = conv_hyperparams
@@ -516,7 +546,7 @@ class ConvolutionalBoxPredictor(BoxPredictor):
           predictions for the proposals.
     """
     # Add a slot for the background class.
-    num_class_slots = self.num_classes + 1
+    #num_class_slots = self.classes + 1
     net = image_features
     with slim.arg_scope(self._conv_hyperparams), \
          slim.arg_scope([slim.dropout], is_training=self._is_training):
@@ -535,32 +565,46 @@ class ConvolutionalBoxPredictor(BoxPredictor):
             net, num_predictions_per_location * self._box_code_size,
             [self._kernel_size, self._kernel_size],
             scope='BoxEncodingPredictor')
-        if self._use_dropout:
-          net = slim.dropout(net, keep_prob=self._dropout_keep_prob)
-        class_predictions_with_background = slim.conv2d(
-            net, num_predictions_per_location * num_class_slots,
-            [self._kernel_size, self._kernel_size], scope='ClassPredictor',
-            biases_initializer=tf.constant_initializer(
-                self._class_prediction_bias_init))
-        if self._apply_sigmoid_to_scores:
-          class_predictions_with_background = tf.sigmoid(
-              class_predictions_with_background)
+        class_predictions_with_background = []
+        for c in self._classes:
+            if isinstance(c,dict):
+                class_name = c['name']
+                has_background = c['has_background']
+                num_class_slots = c['num'] + int(has_background)
+            else:
+                class_name  = c.name
+                has_background = c.has_background
+                num_class_slots = c.num + int(has_background)
+            if self._use_dropout:
+              net = slim.dropout(net, keep_prob=self._dropout_keep_prob)
+            class_predictions= slim.conv2d(
+                net, num_predictions_per_location * num_class_slots,
+                [self._kernel_size, self._kernel_size], scope='ClassPredictor',
+                biases_initializer=tf.constant_initializer(
+                    self._class_prediction_bias_init))
+            if self._apply_sigmoid_to_scores:
+              class_predictions = tf.sigmoid(
+                  class_predictions)
+            combined_feature_map_shape = shape_utils.combined_static_and_dynamic_shape(
+                image_features)
 
-    combined_feature_map_shape = shape_utils.combined_static_and_dynamic_shape(
-        image_features)
+            class_predictions = tf.reshape(
+                class_predictions,
+                tf.stack([combined_feature_map_shape[0],
+                          combined_feature_map_shape[1] *
+                          combined_feature_map_shape[2] *
+                          num_predictions_per_location,
+                          num_class_slots]))
+
+            class_predictions_with_background.append({class_name:class_predictions,'has_background':has_background})
+
+
     box_encodings = tf.reshape(
         box_encodings, tf.stack([combined_feature_map_shape[0],
                                  combined_feature_map_shape[1] *
                                  combined_feature_map_shape[2] *
                                  num_predictions_per_location,
                                  1, self._box_code_size]))
-    class_predictions_with_background = tf.reshape(
-        class_predictions_with_background,
-        tf.stack([combined_feature_map_shape[0],
-                  combined_feature_map_shape[1] *
-                  combined_feature_map_shape[2] *
-                  num_predictions_per_location,
-                  num_class_slots]))
     return {BOX_ENCODINGS: box_encodings,
             CLASS_PREDICTIONS_WITH_BACKGROUND:
             class_predictions_with_background}

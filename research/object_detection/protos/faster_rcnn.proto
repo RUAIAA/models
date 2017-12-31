@@ -17,13 +17,23 @@ import "object_detection/protos/post_processing.proto";
 // (or RPN) and a second stage box classifier.  We thus use the prefixes
 // `first_stage_` and `second_stage_` to indicate the stage to which each
 // parameter pertains when relevant.
+
+message MultiTaskClass {
+    required string name = 1;
+    required int32 num  = 2;
+    required bool associated_with_box_codings = 3;
+    optional bool has_background = 4;
+
+}
+
 message FasterRcnn {
 
   // Whether to construct only the Region Proposal Network (RPN).
   optional bool first_stage_only = 1 [default=false];
 
   // Number of classes to predict.
-  optional int32 num_classes = 3;
+  repeated MultiTaskClass multi_task_class = 2;
+
 
   // Image resizer for preprocessing the input image.
   optional ImageResizer image_resizer = 4;

@@ -53,7 +53,7 @@ class DetectionModel(object):
   """Abstract base class for detection models."""
   __metaclass__ = ABCMeta
 
-  def __init__(self, num_classes):
+  def __init__(self, classes):
     """Constructor.
 
     Args:
@@ -61,12 +61,12 @@ class DetectionModel(object):
       background categories that might be implicitly be predicted in various
       implementations.
     """
-    self._num_classes = num_classes
+    self._classes = classes
     self._groundtruth_lists = {}
 
   @property
-  def num_classes(self):
-    return self._num_classes
+  def classes(self):
+    return self._classes
 
   def groundtruth_lists(self, field):
     """Access list of groundtruth tensors.
@@ -218,7 +218,7 @@ class DetectionModel(object):
           Groundtruth boxes are provided in [y_min, x_min, y_max, x_max]
           format and assumed to be normalized and clipped
           relative to the image window with y_min <= y_max and x_min <= x_max.
-      groundtruth_classes_list: a list of 2-D tf.float32 one-hot (or k-hot)
+      groundtruth_classes_list: a list of dicts containing 2-D tf.float32 one-hot (or k-hot)
         tensors of shape [num_boxes, num_classes] containing the class targets
         with the 0th index assumed to map to the first non-background class.
       groundtruth_masks_list: a list of 3-D tf.float32 tensors of

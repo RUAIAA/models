@@ -20,5 +20,10 @@ message StringIntLabelMapItem {
 };
 
 message StringIntLabelMap {
-  repeated StringIntLabelMapItem item = 1;
+  repeated Class class = 1;
+};
+
+message Class {
+  required string name = 1;
+  repeated StringIntLabelMapItem item = 2;
 };

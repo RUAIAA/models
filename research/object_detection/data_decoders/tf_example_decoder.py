@@ -31,6 +31,7 @@ class TfExampleDecoder(data_decoder.DataDecoder):
   """Tensorflow Example proto decoder."""
 
   def __init__(self,
+               multi_task_class_name,
                load_instance_masks=False,
                label_map_proto_file=None,
                use_display_name=False):
@@ -71,10 +72,10 @@ class TfExampleDecoder(data_decoder.DataDecoder):
             tf.VarLenFeature(tf.float32),
         'image/object/bbox/ymax':
             tf.VarLenFeature(tf.float32),
-        'image/object/class/label':
-            tf.VarLenFeature(tf.int64),
-        'image/object/class/text':
-            tf.VarLenFeature(tf.string),
+#        'image/object/class/label':
+#            tf.VarLenFeature(tf.int64),
+#        'image/object/class/text':
+#            tf.VarLenFeature(tf.string),
         'image/object/area':
             tf.VarLenFeature(tf.float32),
         'image/object/is_crowd':
@@ -84,6 +85,11 @@ class TfExampleDecoder(data_decoder.DataDecoder):
         'image/object/group_of':
             tf.VarLenFeature(tf.int64),
     }
+
+    #add an entry for each multi-task class
+    for label in multi_task_class_name:
+        self.keys_to_features['image/object/class/'+label] = tf.VarLenFeature(tf.int64)
+
     self.items_to_handlers = {
         fields.InputDataFields.image: slim_example_decoder.Image(
             image_key='image/encoded', format_key='image/format', channels=3),
@@ -116,9 +122,11 @@ class TfExampleDecoder(data_decoder.DataDecoder):
     # TODO: Add label_handler that decodes from 'image/object/class/text'
     # primarily after the recent tf.contrib.slim changes make into a release
     # supported by cloudml.
-    label_handler = slim_example_decoder.Tensor('image/object/class/label')
-    self.items_to_handlers[
-        fields.InputDataFields.groundtruth_classes] = label_handler
+    for label in multi_task_class_name:
+        self.items_to_handlers[fields.InputDataFields.groundtruth_classes+'_'+label] = slim_example_decoder.Tensor('image/object/class/'+label)
+    #label_handler = slim_example_decoder.Tensor('image/object/class/label')
+    #self.items_to_handlers[
+    #    fields.InputDataFields.groundtruth_classes] = label_handler
 
   def decode(self, tf_example_string_tensor):
     """Decodes serialized tensorflow example and returns a tensor dictionary.

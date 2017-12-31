@@ -222,7 +222,9 @@ def _build_faster_rcnn_model(frcnn_config, is_training):
     ValueError: If frcnn_config.type is not recognized (i.e. not registered in
       model_class_map).
   """
-  num_classes = frcnn_config.num_classes
+
+  #obtain info about each multi-task class
+  classes = frcnn_config.multi_task_class
   image_resizer_fn = image_resizer_builder.build(frcnn_config.image_resizer)
 
   feature_extractor = _build_faster_rcnn_feature_extractor(
@@ -256,7 +258,8 @@ def _build_faster_rcnn_model(frcnn_config, is_training):
       hyperparams_builder.build,
       frcnn_config.second_stage_box_predictor,
       is_training=is_training,
-      num_classes=num_classes)
+      classes = classes)
+
   second_stage_batch_size = frcnn_config.second_stage_batch_size
   second_stage_balance_fraction = frcnn_config.second_stage_balance_fraction
   (second_stage_non_max_suppression_fn, second_stage_score_conversion_fn
@@ -266,6 +269,7 @@ def _build_faster_rcnn_model(frcnn_config, is_training):
   second_stage_classification_loss = (
       losses_builder.build_faster_rcnn_classification_loss(
           frcnn_config.second_stage_classification_loss))
+
   second_stage_classification_loss_weight = (
       frcnn_config.second_stage_classification_loss_weight)
   second_stage_mask_prediction_loss_weight = (
@@ -280,7 +284,7 @@ def _build_faster_rcnn_model(frcnn_config, is_training):
 
   common_kwargs = {
       'is_training': is_training,
-      'num_classes': num_classes,
+      'classes': classes,
       'image_resizer_fn': image_resizer_fn,
       'feature_extractor': feature_extractor,
       'first_stage_only': first_stage_only,

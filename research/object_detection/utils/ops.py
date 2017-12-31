@@ -695,14 +695,14 @@ def reframe_box_masks_to_image_masks(box_masks, boxes, image_height,
   return tf.squeeze(image_masks, axis=3)
 
 
-def merge_boxes_with_multiple_labels(boxes, classes, num_classes):
+def merge_boxes_with_multiple_labels(boxes, classes,classes_config):
   """Merges boxes with same coordinates and returns K-hot encoded classes.
 
   Args:
     boxes: A tf.float32 tensor with shape [N, 4] holding N boxes.
     classes: A tf.int32 tensor with shape [N] holding class indices.
       The class index starts at 0.
-    num_classes: total number of classes to use for K-hot encoding.
+
 
   Returns:
     merged_boxes: A tf.float32 tensor with shape [N', 4] holding boxes,
@@ -712,7 +712,7 @@ def merge_boxes_with_multiple_labels(boxes, classes, num_classes):
     merged_box_indices: A tf.int32 tensor with shape [N'] holding original
       indices of the boxes.
   """
-  def merge_numpy_boxes(boxes, classes, num_classes):
+  def merge_numpy_boxes(boxes, classes):
     """Python function to merge numpy boxes."""
     if boxes.size < 1:
       return (np.zeros([0, 4], dtype=np.float32),
@@ -721,13 +721,19 @@ def merge_boxes_with_multiple_labels(boxes, classes, num_classes):
     box_to_class_indices = {}
     for box_index in range(boxes.shape[0]):
       box = tuple(boxes[box_index, :].tolist())
-      class_index = classes[box_index]
+      class_indices = {k:v[box_index] for k,v in classes.items()}#classes[box_index]
       if box not in box_to_class_indices:
-        box_to_class_indices[box] = [box_index, np.zeros([num_classes])]
-      box_to_class_indices[box][1][class_index] = 1
+        box_to_class_indices[box] = [box_index, {c.name : np.zeros[c.num] for c in classes_config}]
+      for k in box_to_class_indices[box][1].keys():
+          box_to_class_indices[box][1][k][class_indices[k]] = 1
     merged_boxes = np.vstack(box_to_class_indices.keys()).astype(np.float32)
-    class_encodings = [item[1] for item in box_to_class_indices.values()]
-    class_encodings = np.vstack(class_encodings).astype(np.int32)
+    #class_encodings = [item[1] for item in box_to_class_indices.values()]
+    classes_encodings = {c.name:[] for c in classes_config}
+    for d in box_to_class_indices.values():
+        for k,v in d[1]:
+            classes_encodings[k].append(v)
+    classes_encodings = {k:np.vstack(v).astype(np.int32) for k,v in class_encodings.item()}
+    #class_encodings = np.vstack(class_encodings).astype(np.int32)
     merged_box_indices = [item[0] for item in box_to_class_indices.values()]
     merged_box_indices = np.array(merged_box_indices).astype(np.int32)
     return merged_boxes, class_encodings, merged_box_indices
@@ -736,6 +742,6 @@ def merge_boxes_with_multiple_labels(boxes, classes, num_classes):
       merge_numpy_boxes, [boxes, classes, num_classes],
       [tf.float32, tf.int32, tf.int32])
   merged_boxes = tf.reshape(merged_boxes, [-1, 4])
-  class_encodings = tf.reshape(class_encodings, [-1, num_classes])
+  class_encodings = {c.name:tf.reshape(classes_encodings[c.name], [-1,c.num]) for c in classes_config }
   merged_box_indices = tf.reshape(merged_box_indices, [-1])
   return merged_boxes, class_encodings, merged_box_indices

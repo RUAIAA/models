@@ -31,6 +31,7 @@ from object_detection.models import faster_rcnn_inception_resnet_v2_feature_extr
 from object_detection.models import faster_rcnn_inception_v2_feature_extractor as frcnn_inc_v2
 from object_detection.models import faster_rcnn_nas_feature_extractor as frcnn_nas
 from object_detection.models import faster_rcnn_resnet_v1_feature_extractor as frcnn_resnet_v1
+from object_detection.models import faster_rcnn_inception_v3_feature_extractor as frcnn_inc_v3
 from object_detection.models.embedded_ssd_mobilenet_v1_feature_extractor import EmbeddedSSDMobileNetV1FeatureExtractor
 from object_detection.models.ssd_inception_v2_feature_extractor import SSDInceptionV2FeatureExtractor
 from object_detection.models.ssd_inception_v3_feature_extractor import SSDInceptionV3FeatureExtractor
@@ -59,6 +60,8 @@ FASTER_RCNN_FEATURE_EXTRACTOR_CLASS_MAP = {
     frcnn_resnet_v1.FasterRCNNResnet101FeatureExtractor,
     'faster_rcnn_resnet152':
     frcnn_resnet_v1.FasterRCNNResnet152FeatureExtractor,
+    'faster_rcnn_inception_v3':
+    frcnn_inc_v3.FasterRCNNInceptionV3FeatureExtractor
 }
 
 
@@ -190,6 +193,7 @@ def _build_faster_rcnn_feature_extractor(
   Raises:
     ValueError: On invalid feature extractor type.
   """
+  import pdb;pdb.set_trace()
   feature_type = feature_extractor_config.type
   first_stage_features_stride = (
       feature_extractor_config.first_stage_features_stride)

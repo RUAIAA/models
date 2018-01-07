@@ -133,7 +133,7 @@ class FasterRCNNInceptionV2FeatureExtractor(
               min_depth=self._min_depth,
               depth_multiplier=self._depth_multiplier,
               scope=scope)
-
+    import pdb;pdb.set_trace()
     return activations['Mixed_4e']
 
   def _extract_box_classifier_features(self, proposal_feature_maps, scope):

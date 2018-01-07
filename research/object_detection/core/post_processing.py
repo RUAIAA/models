@@ -141,11 +141,16 @@ def multiclass_non_max_suppression(boxes,
               boxlist_filtered, clip_window)
       max_selection_size = tf.minimum(max_size_per_class,
                                       boxlist_filtered.num_boxes())
+      selected_indices = tf.transpose(
+                            tf.range(
+                                boxlist_filtered.num_boxes()))
+      """
       selected_indices = tf.image.non_max_suppression(
           boxlist_filtered.get(),
           boxlist_filtered.get_field(fields.BoxListFields.scores),
           max_selection_size,
           iou_threshold=iou_thresh)
+      """
       nms_result = box_list_ops.gather(boxlist_filtered, selected_indices)
       nms_result.add_field(
           fields.BoxListFields.classes, (tf.zeros_like(

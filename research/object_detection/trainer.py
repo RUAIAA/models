@@ -118,9 +118,10 @@ def get_inputs(input_queue, classes, merge_multiple_label_boxes=False):
     if fields.InputDataFields.source_id in read_data:
       key = read_data[fields.InputDataFields.source_id]
     location_gt = read_data[fields.InputDataFields.groundtruth_boxes]
+
     classes_gt = {}
     for k,v in read_data.items():
-        if fields.InputDataFields.groundtruth_classes in k:
+        if k in fields.InputDataFields.labels:
             classes_gt[k] = tf.cast(v,tf.int32)
             classes_gt[k]-= label_id_offset
     #classes_gt = tf.cast(read_data[fields.InputDataFields.groundtruth_classes],
@@ -130,8 +131,9 @@ def get_inputs(input_queue, classes, merge_multiple_label_boxes=False):
       location_gt, classes_gt, _ = util_ops.merge_boxes_with_multiple_labels(
           location_gt, classes_gt)
     else:
-      classes_gt = {c.name : util_ops.padded_one_hot_encoding(
-          indices=classes_gt[fields.InputDataFields.groundtruth_classes+'_'+c.name], depth=c.num, left_pad=0) for c in classes}
+      labels = fields.InputDataFields.labels
+      classes_gt = {'groundtruth_' + c.name: util_ops.padded_one_hot_encoding(
+          indices=classes_gt['groundtruth_' + c.name], depth=c.num, left_pad=0) for c in classes}
       #classes_gt = util_ops.padded_one_hot_encoding(
       #  indices=classes_gt, depth=num_classes, left_pad=0)
     masks_gt = read_data.get(fields.InputDataFields.groundtruth_instance_masks)
@@ -174,7 +176,12 @@ def _create_losses(input_queue, create_model_fn, train_config):
 
   losses_dict = detection_model.loss(prediction_dict)
   for loss_tensor in losses_dict.values():
-    tf.losses.add_loss(loss_tensor)
+    if isinstance(loss_tensor,list):
+       for loss in loss_tensor:
+           tf.losses.add_loss(loss)
+    else:
+        tf.losses.add_loss(loss_tensor)
+
 
 
 def train(create_tensor_dict_fn, create_model_fn, train_config, master, task,

@@ -1,0 +1,6 @@
+message MultiTaskClass {
+    required string name = 1;
+    required int32 num  = 2;
+    required bool associated_with_box_codings = 3;
+    optional bool has_background = 4;
+};

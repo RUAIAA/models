@@ -159,7 +159,7 @@ class SSDMetaArch(model.DetectionModel):
       add_summaries: boolean (default: True) controlling whether summary ops
         should be added to tensorflow graph.
     """
-    super(SSDMetaArch, self).__init__(num_classes=box_predictor.num_classes)
+    super(SSDMetaArch, self).__init__(classes=box_predictor.classes)
     self._is_training = is_training
 
     # Needed for fine-tuning from classification checkpoints whose
@@ -175,8 +175,10 @@ class SSDMetaArch(model.DetectionModel):
     self._region_similarity_calculator = region_similarity_calculator
 
     # TODO: handle agnostic mode and positive/negative class weights
-    unmatched_cls_target = None
-    unmatched_cls_target = tf.constant([1] + self.num_classes * [0], tf.float32)
+    #unmatched_cls_target = None
+    #unmatched_cls_target = tf.constant([1] + self.num_classes * [0], tf.float32)
+    unmatched_cls_target = {'groundtruth_'+c.name: tf.constant(
+        [1] + c.num * [0], dtype=tf.float32) for c in self._classes}
     self._target_assigner = target_assigner.TargetAssigner(
         self._region_similarity_calculator,
         self._matcher,
@@ -291,7 +293,7 @@ class SSDMetaArch(model.DetectionModel):
       class_predictions_with_background: 3-D float tensor of shape
           [batch_size, num_anchors, num_classes+1] containing class predictions
           (logits) for each of the anchors.  Note that this tensor *includes*
-          background class predictions (at class index 0).
+          background class predictions (at class index 0).a
 
     Raises:
       RuntimeError: if the number of feature maps extracted via the
@@ -300,6 +302,7 @@ class SSDMetaArch(model.DetectionModel):
       RuntimeError: if box_encodings from the box_predictor does not have
         shape of the form  [batch_size, num_anchors, 1, code_size].
     """
+
     num_anchors_per_location_list = (
         self._anchor_generator.num_anchors_per_location())
     if len(feature_maps) != len(num_anchors_per_location_list):
@@ -334,10 +337,17 @@ class SSDMetaArch(model.DetectionModel):
         'Mismatch: number of anchors vs number of predictions', num_anchors,
         num_predictions
     ])
+
     with tf.control_dependencies([anchors_assert]):
       box_encodings = tf.concat(box_encodings_list, 1)
-      class_predictions_with_background = tf.concat(
-          cls_predictions_with_background_list, 1)
+
+      cls_predictions_with_background_dict = {cls.name: [] for cls in self._classes}
+      for cls in cls_predictions_with_background_list:
+          for k, v in cls.items():
+            cls_predictions_with_background_dict[k].append(v)
+
+      cls_predictions_with_background_dict = {k:  tf.concat(v, 1) for k, v in cls_predictions_with_background_dict.items() }
+      class_predictions_with_background =  [{cls.name: cls_predictions_with_background_dict[cls.name], 'has_background': cls.has_background} for cls in self._classes]
     return box_encodings, class_predictions_with_background
 
   def _get_feature_map_spatial_dims(self, feature_maps):
@@ -445,6 +455,7 @@ class SSDMetaArch(model.DetectionModel):
         `classification_loss`) to scalar tensors representing corresponding loss
         values.
     """
+
     with tf.name_scope(scope, 'Loss', prediction_dict.values()):
       keypoints = None
       if self.groundtruth_has_field(fields.BoxListFields.keypoints):
@@ -464,13 +475,15 @@ class SSDMetaArch(model.DetectionModel):
           batch_reg_targets,
           ignore_nan_targets=True,
           weights=batch_reg_weights)
-      cls_losses = self._classification_loss(
-          prediction_dict['class_predictions_with_background'],
-          batch_cls_targets,
-          weights=batch_cls_weights)
+
+      cls_losses = {k:
+          self._classification_loss(
+              v,
+              batch_cls_targets['groundtruth_'+k],
+              weights=batch_cls_weights) for cls in prediction_dict['class_predictions_with_background'] for k, v in cls.items() if k != 'has_background'}
 
       if self._hard_example_miner:
-        (localization_loss, classification_loss) = self._apply_hard_mining(
+        (localization_loss, classification_loss_dict) = self._apply_hard_mining(
             location_losses, cls_losses, prediction_dict, match_list)
         if self._add_summaries:
           self._hard_example_miner.summarize()
@@ -492,14 +505,17 @@ class SSDMetaArch(model.DetectionModel):
       with tf.name_scope('localization_loss'):
         localization_loss = ((self._localization_loss_weight / normalizer) *
                              localization_loss)
-      with tf.name_scope('classification_loss'):
-        classification_loss = ((self._classification_loss_weight / normalizer) *
-                               classification_loss)
+      classification_loss_list = []
+      for k, v in classification_loss_dict.items():
+          with tf.name_scope('classification_loss/'+k):
+               classification_loss_list.append(((self._classification_loss_weight / normalizer) *
+                                       v))
 
       loss_dict = {
           'localization_loss': localization_loss,
-          'classification_loss': classification_loss
+          'classification_loss': classification_loss_list
       }
+
     return loss_dict
 
   def _summarize_anchor_classification_loss(self, class_ids, cls_losses):
@@ -549,9 +565,12 @@ class SSDMetaArch(model.DetectionModel):
         box_list.BoxList(boxes) for boxes in groundtruth_boxes_list
     ]
     groundtruth_classes_with_background_list = [
-        tf.pad(one_hot_encoding, [[0, 0], [1, 0]], mode='CONSTANT')
-        for one_hot_encoding in groundtruth_classes_list
+        { k:
+            tf.pad(v, [[0, 0], [1, 0]], mode='CONSTANT')
+            for k, v in one_hot_encoding.items() }
+            for one_hot_encoding in groundtruth_classes_list
     ]
+
     if groundtruth_keypoints_list is not None:
       for boxlist, keypoints in zip(
           groundtruth_boxlists, groundtruth_keypoints_list):
@@ -620,19 +639,21 @@ class SSDMetaArch(model.DetectionModel):
       mined_cls_loss: a float scalar with sum of classification losses from
         selected hard examples.
     """
-    class_predictions = tf.slice(
-        prediction_dict['class_predictions_with_background'], [0, 0,
-                                                               1], [-1, -1, -1])
+    class_predictions = [ { k: tf.slice(
+                                v, [0, 0, 1], [-1, -1, -1]) for k,v in cls.items() if k!= 'has_background'}
+                            for cls in prediction_dict['class_predictions_with_background'] ]
 
     decoded_boxes, _ = self._batch_decode(prediction_dict['box_encodings'])
     decoded_box_tensors_list = tf.unstack(decoded_boxes)
-    class_prediction_list = tf.unstack(class_predictions)
+    class_prediction_list_dict = { k: tf.unstack(v) for cls in class_predictions for k, v in cls.items() }
+    class_prediction_list = list(map(dict, zip(*[[(k, v) for v in value] for k, value in class_prediction_list_dict.items()])))
     decoded_boxlist_list = []
     for box_location, box_score in zip(decoded_box_tensors_list,
                                        class_prediction_list):
       decoded_boxlist = box_list.BoxList(box_location)
       decoded_boxlist.add_field('scores', box_score)
       decoded_boxlist_list.append(decoded_boxlist)
+
     return self._hard_example_miner(
         location_losses=location_losses,
         cls_losses=cls_losses,

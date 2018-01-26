@@ -10,12 +10,13 @@ import "object_detection/protos/matcher.proto";
 import "object_detection/protos/losses.proto";
 import "object_detection/protos/post_processing.proto";
 import "object_detection/protos/region_similarity_calculator.proto";
+import "object_detection/protos/multi_task.proto";
 
 // Configuration for Single Shot Detection (SSD) models.
 message Ssd {
 
-  // Number of classes to predict.
-  optional int32 num_classes = 1;
+  // Labels to predict for each object.
+  repeated MultiTaskClass label = 1;
 
   // Image resizer for preprocessing the input image.
   optional ImageResizer image_resizer = 2;

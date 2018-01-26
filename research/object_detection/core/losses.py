@@ -320,39 +320,24 @@ class WeightedSoftmaxClassificationLoss(Loss):
 
   def _compute_loss(self, prediction_tensor, target_tensor, weights):
     """Compute loss function.
-
     Args:
       prediction_tensor: A float tensor of shape [batch_size, num_anchors,
         num_classes] representing the predicted logits for each class
       target_tensor: A float tensor of shape [batch_size, num_anchors,
         num_classes] representing one-hot encoded classification targets
       weights: a float tensor of shape [batch_size, num_anchors]
-
     Returns:
       loss: a (scalar) tensor representing the value of the loss function
     """
-
-    if not isinstance(prediction_tensor,dict):
-        num_classes = prediction_tensor.get_shape().as_list()[-1]
-        prediction_tensor = tf.divide(
-            prediction_tensor, self._logit_scale, name='scale_logit')
-        per_row_cross_ent = (tf.nn.softmax_cross_entropy_with_logits(
-            labels=tf.reshape(target_tensor, [-1, num_classes]),
-            logits=tf.reshape(prediction_tensor, [-1, num_classes])))
-        if self._anchorwise_output:
-          return tf.reshape(per_row_cross_ent, tf.shape(weights)) * weights
-        return tf.reduce_sum(per_row_cross_ent * tf.reshape(weights, [-1]))
-    else:
-        combined_sum = 0
-        for k,v in prediction_tensor.items():
-            num_classes = v.get_shape().as_list()[-1]
-            prediction_tensor = tf.divide(
-                v, self._logit_scale, name='scale_logit')
-            per_row_cross_ent = (tf.nn.softmax_cross_entropy_with_logits(
-                labels=tf.reshape(target_tensor[k], [-1, num_classes]),
-                logits=tf.reshape(v, [-1, num_classes])))
-            combined_sum+=tf.reduce_sum(per_row_cross_ent * tf.reshape(weights, [-1]))
-        return combined_sum
+    num_classes = prediction_tensor.get_shape().as_list()[-1]
+    prediction_tensor = tf.divide(
+        prediction_tensor, self._logit_scale, name='scale_logit')
+    per_row_cross_ent = (tf.nn.softmax_cross_entropy_with_logits(
+        labels=tf.reshape(target_tensor, [-1, num_classes]),
+        logits=tf.reshape(prediction_tensor, [-1, num_classes])))
+    if self._anchorwise_output:
+      return tf.reshape(per_row_cross_ent, tf.shape(weights)) * weights
+    return tf.reduce_sum(per_row_cross_ent * tf.reshape(weights, [-1]))
 
 
 
@@ -527,7 +512,8 @@ class HardExampleMiner(object):
     mined_location_losses = []
     mined_cls_losses = []
     location_losses = tf.unstack(location_losses)
-    cls_losses = tf.unstack(cls_losses)
+    cls_losses_dict = {k : tf.unstack(v) for k,v in cls_losses.items()}
+    cls_losses = list(map(dict, zip(*[[(k, v) for v in value] for k, value in cls_losses_dict.items()])))
     num_images = len(decoded_boxlist_list)
     if not match_list:
       match_list = num_images * [None]
@@ -548,8 +534,12 @@ class HardExampleMiner(object):
       if self._loss_type == 'loc':
         image_losses = location_losses[ind]
       elif self._loss_type == 'both':
-        image_losses *= self._cls_loss_weight
+        from functools import reduce
+        image_losses = reduce((lambda x,v: (x + v * self._cls_loss_weight)),image_losses.values())
         image_losses += location_losses[ind] * self._loc_loss_weight
+      else:
+        from functools import reduce
+        image_losses = reduce((lambda x,v: (x + v)),image_losses.values())
       if self._num_hard_examples is not None:
         num_hard_examples = self._num_hard_examples
       else:
@@ -565,10 +555,22 @@ class HardExampleMiner(object):
         num_negatives_list.append(num_negatives)
       mined_location_losses.append(
           tf.reduce_sum(tf.gather(location_losses[ind], selected_indices)))
+      batched_cls_loss = {k:[] for k in cls_losses[0].keys()}
+
+      for entry in cls_losses:
+          for k, v in entry.items():
+              batched_cls_loss[k].append(v)
+
       mined_cls_losses.append(
-          tf.reduce_sum(tf.gather(cls_losses[ind], selected_indices)))
+         {k: tf.reduce_sum(tf.gather(v[ind], selected_indices)) for k, v in batched_cls_loss.items()})
+
     location_loss = tf.reduce_sum(tf.stack(mined_location_losses))
-    cls_loss = tf.reduce_sum(tf.stack(mined_cls_losses))
+    batched_mined_cls_loss = {k:[] for k in cls_losses[0].keys()}
+    for entry in cls_losses:
+        for k, v in entry.items():
+            batched_mined_cls_loss[k].append(v)
+
+    cls_loss = {k: tf.reduce_sum(tf.stack(v)) for k, v in batched_mined_cls_loss.items()}
     if match and self._max_negatives_per_positive:
       self._num_positives_list = num_positives_list
       self._num_negatives_list = num_negatives_list

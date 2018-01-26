@@ -68,7 +68,7 @@ def build(input_reader_config):
     if input_reader_config.HasField('label_map_path'):
       label_map_proto_file = input_reader_config.label_map_path
     decoder = tf_example_decoder.TfExampleDecoder(
-        input_reader_config.multi_task_class_name,
+        input_reader_config.multi_task_label,
         load_instance_masks=input_reader_config.load_instance_masks,
         label_map_proto_file=label_map_proto_file)
     return decoder.decode(string_tensor)

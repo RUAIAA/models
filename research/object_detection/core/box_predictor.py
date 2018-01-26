@@ -547,6 +547,7 @@ class ConvolutionalBoxPredictor(BoxPredictor):
     """
     # Add a slot for the background class.
     #num_class_slots = self.classes + 1
+
     net = image_features
     with slim.arg_scope(self._conv_hyperparams), \
          slim.arg_scope([slim.dropout], is_training=self._is_training):
@@ -565,7 +566,8 @@ class ConvolutionalBoxPredictor(BoxPredictor):
             net, num_predictions_per_location * self._box_code_size,
             [self._kernel_size, self._kernel_size],
             scope='BoxEncodingPredictor')
-        class_predictions_with_background = []
+        class_predictions_with_background = {}
+
         for c in self._classes:
             if isinstance(c,dict):
                 class_name = c['name']
@@ -579,7 +581,7 @@ class ConvolutionalBoxPredictor(BoxPredictor):
               net = slim.dropout(net, keep_prob=self._dropout_keep_prob)
             class_predictions= slim.conv2d(
                 net, num_predictions_per_location * num_class_slots,
-                [self._kernel_size, self._kernel_size], scope='ClassPredictor',
+                [self._kernel_size, self._kernel_size], scope='ClassPredictor_'+class_name,
                 biases_initializer=tf.constant_initializer(
                     self._class_prediction_bias_init))
             if self._apply_sigmoid_to_scores:
@@ -596,7 +598,7 @@ class ConvolutionalBoxPredictor(BoxPredictor):
                           num_predictions_per_location,
                           num_class_slots]))
 
-            class_predictions_with_background.append({class_name:class_predictions,'has_background':has_background})
+            class_predictions_with_background.update({class_name: class_predictions})
 
 
     box_encodings = tf.reshape(

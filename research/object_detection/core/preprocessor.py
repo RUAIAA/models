@@ -2008,7 +2008,6 @@ def ssd_random_crop(image,
     keypoints: rank 3 float32 tensor with shape
                [num_instances, num_keypoints, 2]
   """
-
   def random_crop_selector(selected_result, index):
     """Applies random_crop_image to selected result.
 

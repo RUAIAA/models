@@ -19,7 +19,7 @@ import collections
 import tensorflow as tf
 
 from object_detection.core import prefetcher
-
+from object_detection.core import standard_fields as fields
 rt_shape_str = '_runtime_shapes'
 
 
@@ -79,14 +79,37 @@ class BatchQueue(object):
         assembled batches.
     """
     # Remember static shapes to set shapes of batched tensors.
-    static_shapes = collections.OrderedDict(
-        {key: tensor.get_shape() for key, tensor in tensor_dict.items()})
-    # Remember runtime shapes to unpad tensors after batching.
-    runtime_shapes = collections.OrderedDict(
-        {(key + rt_shape_str): tf.shape(tensor)
-         for key, tensor in tensor_dict.items()})
+    static_shapes_dict = {}
+    for key, tensor in tensor_dict.items():
+        #tensor might be a dict if the key is groundtruth_classes
+        if key == fields.InputDataFields.groundtruth_classes:
+            for label, tensor_label in tensor.items():
+                static_shapes_dict['groundtruth_'+label] = tensor_label.get_shape()
+        else:
+            static_shapes_dict[key] = tensor.get_shape()
+    static_shapes = collections.OrderedDict(static_shapes_dict)
 
-    all_tensors = tensor_dict
+    # Remember runtime shapes to unpad tensors after batching.
+    runtime_shapes_dict = {}
+    for key, tensor in tensor_dict.items():
+        #tensor might be a dict if the key is a groundtruth_clases
+        if key == fields.InputDataFields.groundtruth_classes:
+            for label, tensor_label in tensor.items():
+                runtime_shapes_dict[('groundtruth_'+label + rt_shape_str)] = tf.shape(tensor_label)
+        else:
+            runtime_shapes_dict[(key + rt_shape_str)] = tf.shape(tensor)
+    runtime_shapes = collections.OrderedDict(runtime_shapes_dict)
+
+    all_tensors = {}
+    for key, tensor in tensor_dict.items():
+        #split up items in groundtruth_classes
+        if key == fields.InputDataFields.groundtruth_classes:
+            for label, tensor_label in tensor.items():
+                all_tensors['groundtruth_'+label] = tensor_label
+                fields.InputDataFields.labels.append('groundtruth_'+label)
+        else:
+            all_tensors[key] = tensor
+
     all_tensors.update(runtime_shapes)
     batched_tensors = tf.train.batch(
         all_tensors,
@@ -109,6 +132,7 @@ class BatchQueue(object):
       A list of tensor_dicts of the requested batch_size.
     """
     batched_tensors = self._queue.dequeue()
+
     # Separate input tensors from tensors containing their runtime shapes.
     tensors = {}
     shapes = {}

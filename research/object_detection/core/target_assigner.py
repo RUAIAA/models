@@ -215,7 +215,6 @@ class TargetAssigner(object):
     Returns:
       reg_targets: a float32 tensor with shape [N, box_code_dimension]
     """
-    import pdb;pdb.set_trace()
     matched_anchor_indices = match.matched_column_indices()
     unmatched_ignored_anchor_indices = (match.
                                         unmatched_or_ignored_column_indices())
@@ -478,11 +477,16 @@ def batch_assign_targets(target_assigner,
     match_list.append(match)
 
   if isinstance(cls_targets_list[0],dict):
-      batch_cls_targets = {k: tf.stack([v]) for k,v in cls_targets_list[0].items()}
+      cls_targets_dict = {k: [] for k in cls_targets_list[0].keys() }
+      for entry in cls_targets_list:
+          for k, v in entry.items():
+            cls_targets_dict[k].append(v)
+      batch_cls_targets = {k: tf.stack(v) for k,v in cls_targets_dict.items()}
   else:
       batch_cls_targets = tf.stack(cls_targets_list)
   batch_cls_weights = tf.stack(cls_weights_list)
   batch_reg_targets = tf.stack(reg_targets_list)
   batch_reg_weights = tf.stack(reg_weights_list)
+
   return (batch_cls_targets, batch_cls_weights, batch_reg_targets,
           batch_reg_weights, match_list)

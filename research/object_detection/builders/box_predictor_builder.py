@@ -51,6 +51,7 @@ def build(argscope_fn, box_predictor_config, is_training, classes):
     conv_box_predictor = box_predictor_config.convolutional_box_predictor
     conv_hyperparams = argscope_fn(conv_box_predictor.conv_hyperparams,
                                    is_training)
+
     box_predictor_object = box_predictor.ConvolutionalBoxPredictor(
         is_training=is_training,
         classes=classes,

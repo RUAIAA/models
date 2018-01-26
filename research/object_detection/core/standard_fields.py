@@ -79,6 +79,7 @@ class InputDataFields(object):
   groundtruth_keypoints = 'groundtruth_keypoints'
   groundtruth_keypoint_visibilities = 'groundtruth_keypoint_visibilities'
   groundtruth_label_scores = 'groundtruth_label_scores'
+  labels = []
 
 
 class DetectionResultFields(object):

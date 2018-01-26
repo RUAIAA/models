@@ -31,7 +31,7 @@ class TfExampleDecoder(data_decoder.DataDecoder):
   """Tensorflow Example proto decoder."""
 
   def __init__(self,
-               multi_task_class_name,
+               multi_task_label,
                load_instance_masks=False,
                label_map_proto_file=None,
                use_display_name=False):
@@ -87,7 +87,7 @@ class TfExampleDecoder(data_decoder.DataDecoder):
     }
 
     #add an entry for each multi-task class
-    for label in multi_task_class_name:
+    for label in multi_task_label:
         self.keys_to_features['image/object/class/'+label] = tf.VarLenFeature(tf.int64)
 
     self.items_to_handlers = {
@@ -122,8 +122,9 @@ class TfExampleDecoder(data_decoder.DataDecoder):
     # TODO: Add label_handler that decodes from 'image/object/class/text'
     # primarily after the recent tf.contrib.slim changes make into a release
     # supported by cloudml.
-    for label in multi_task_class_name:
+    for label in multi_task_label:
         self.items_to_handlers[fields.InputDataFields.groundtruth_classes+'_'+label] = slim_example_decoder.Tensor('image/object/class/'+label)
+    self.labels = multi_task_label
     #label_handler = slim_example_decoder.Tensor('image/object/class/label')
     #self.items_to_handlers[
     #    fields.InputDataFields.groundtruth_classes] = label_handler
@@ -169,6 +170,12 @@ class TfExampleDecoder(data_decoder.DataDecoder):
     is_crowd = fields.InputDataFields.groundtruth_is_crowd
     tensor_dict[is_crowd] = tf.cast(tensor_dict[is_crowd], dtype=tf.bool)
     tensor_dict[fields.InputDataFields.image].set_shape([None, None, 3])
+    tensor_dict[fields.InputDataFields.groundtruth_classes] = {}
+    for label in self.labels:
+        key = fields.InputDataFields.groundtruth_classes+'_'+label
+        tensor_dict[fields.InputDataFields.groundtruth_classes].update({label:
+                                                                            tensor_dict[key]})
+        del tensor_dict[key]
     return tensor_dict
 
   def _reshape_instance_masks(self, keys_to_tensors):

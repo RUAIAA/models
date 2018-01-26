@@ -132,7 +132,7 @@ def _build_ssd_model(ssd_config, is_training):
     ValueError: If ssd_config.type is not recognized (i.e. not registered in
       model_class_map).
   """
-  num_classes = ssd_config.num_classes
+  labels = ssd_config.label
 
   # Feature extractor
   feature_extractor = _build_ssd_feature_extractor(ssd_config.feature_extractor,
@@ -144,7 +144,7 @@ def _build_ssd_model(ssd_config, is_training):
       ssd_config.similarity_calculator)
   ssd_box_predictor = box_predictor_builder.build(hyperparams_builder.build,
                                                   ssd_config.box_predictor,
-                                                  is_training, num_classes)
+                                                  is_training, labels)
   anchor_generator = anchor_generator_builder.build(
       ssd_config.anchor_generator)
   image_resizer_fn = image_resizer_builder.build(ssd_config.image_resizer)

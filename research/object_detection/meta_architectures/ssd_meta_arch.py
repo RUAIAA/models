@@ -449,6 +449,13 @@ class SSDMetaArch(model.DetectionModel):
       keypoints = None
       if self.groundtruth_has_field(fields.BoxListFields.keypoints):
         keypoints = self.groundtruth_lists(fields.BoxListFields.keypoints)
+      """Assigns targets based on IOU of anchor and groundtruth box
+            Using Argmax matcher which takes the maximum IOU index in a row for each column
+            of the similarity matrix. Regression targets are assigned a code of 0,0,0,0 and classification
+            are assigned the unmatched class target. Use a combination of regression and classification
+            matching for multi-task. Need to find a clean way to give an unmatched class Constant tensor for each
+            label.
+      """
       (batch_cls_targets, batch_cls_weights, batch_reg_targets,
        batch_reg_weights, match_list) = self._assign_targets(
            self.groundtruth_lists(fields.BoxListFields.boxes),
@@ -468,7 +475,7 @@ class SSDMetaArch(model.DetectionModel):
           prediction_dict['class_predictions_with_background'],
           batch_cls_targets,
           weights=batch_cls_weights)
-
+      """Handle Multi-Task losses separately from the loss associated with localization"""
       if self._hard_example_miner:
         (localization_loss, classification_loss) = self._apply_hard_mining(
             location_losses, cls_losses, prediction_dict, match_list)
@@ -548,6 +555,7 @@ class SSDMetaArch(model.DetectionModel):
     groundtruth_boxlists = [
         box_list.BoxList(boxes) for boxes in groundtruth_boxes_list
     ]
+    #add background to one-hot encodings
     groundtruth_classes_with_background_list = [
         tf.pad(one_hot_encoding, [[0, 0], [1, 0]], mode='CONSTANT')
         for one_hot_encoding in groundtruth_classes_list

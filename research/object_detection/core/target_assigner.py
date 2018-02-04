@@ -265,6 +265,23 @@ class TargetAssigner(object):
         [matched_cls_targets, unmatched_ignored_cls_targets])
     return cls_targets
 
+  def _create_nonbackground_classification_targets(self, groundtruth_labels, match):
+      """Creates classification target for secondary classifications that aren't associated
+         with the background class
+         Args:
+           groundtruth_labels:  a tensor of shape [num_gt_boxes, d_1, ... d_k]
+             with labels for each of the ground_truth boxes. The subshape
+             [d_1, ... d_k] can be empty (corresponding to scalar labels).
+           match: a matcher.Match object that provides a matching between anchors
+             and groundtruth boxes.
+
+         Returns:
+           cls_targets: a float32 tensor with shape [num_anchors, d_1, d_2 ... d_k],
+             where the subshape [d_1, ..., d_k] is compatible with groundtruth_labels
+             which has shape [num_gt_boxes, d_1, d_2, ... d_k].
+    """
+    pass
+    """similar to regression targets except for the classes that aren't the background"""
   def _create_regression_weights(self, match):
     """Set regression weight for each anchor.
 

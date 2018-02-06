@@ -85,7 +85,7 @@ def create_input_queue(batch_size_per_clone, create_tensor_dict_fn,
   return input_queue
 
 
-def get_inputs(input_queue, num_classes, merge_multiple_label_boxes=False):
+def get_inputs(input_queue, num_classes, multi_task_labels_dict,merge_multiple_label_boxes=False):
   """Dequeues batch and constructs inputs to object detection model.
 
   Args:
@@ -127,12 +127,17 @@ def get_inputs(input_queue, num_classes, merge_multiple_label_boxes=False):
     else:
       classes_gt = util_ops.padded_one_hot_encoding(
           indices=classes_gt, depth=num_classes, left_pad=0)
+    classes_mtl_gt = {}
+    #MultiTaskLabel: now we build the dictionary
+    for gt_mtl_name, gt_mtl_num_classes in multi_task_labels_dict.items():
+        classes_mtl_gt[gt_mtl_name] = util_ops.padded_one_hot_encoding(
+            indices=read_data[fields.InputDataFields.groundtruth_multi_task_labels+gt_mtl_name], depth=gt_mtl_num_classes, left_pad=0)
     masks_gt = read_data.get(fields.InputDataFields.groundtruth_instance_masks)
     keypoints_gt = read_data.get(fields.InputDataFields.groundtruth_keypoints)
     if (merge_multiple_label_boxes and (
         masks_gt is not None or keypoints_gt is not None)):
       raise NotImplementedError('Multi-label support is only for boxes.')
-    return image, key, location_gt, classes_gt, masks_gt, keypoints_gt
+    return image, key, location_gt, classes_gt, masks_gt, keypoints_gt, classes_mtl_gt
 
   return zip(*map(extract_images_and_targets, read_data_list))
 
@@ -147,9 +152,10 @@ def _create_losses(input_queue, create_model_fn, train_config):
   """
   detection_model = create_model_fn()
   (images, _, groundtruth_boxes_list, groundtruth_classes_list,
-   groundtruth_masks_list, groundtruth_keypoints_list) = get_inputs(
+   groundtruth_masks_list, groundtruth_keypoints_list, groundtruth_multi_task_labels_dict) = get_inputs(
        input_queue,
        detection_model.num_classes,
+       detection_model.multi_task_labels_dict,
        train_config.merge_multiple_label_boxes)
   images = [detection_model.preprocess(image) for image in images]
   images = tf.concat(images, 0)
@@ -157,11 +163,12 @@ def _create_losses(input_queue, create_model_fn, train_config):
     groundtruth_masks_list = None
   if any(keypoints is None for keypoints in groundtruth_keypoints_list):
     groundtruth_keypoints_list = None
-
+  #change name of multi-task here
   detection_model.provide_groundtruth(groundtruth_boxes_list,
                                       groundtruth_classes_list,
                                       groundtruth_masks_list,
-                                      groundtruth_keypoints_list)
+                                      groundtruth_keypoints_list,
+                                      groundtruth_multi_task_labels_dict)
   prediction_dict = detection_model.predict(images)
 
   losses_dict = detection_model.loss(prediction_dict)

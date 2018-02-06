@@ -24,6 +24,7 @@ import tensorflow as tf
 
 from object_detection.core import box_list
 from object_detection.core import box_predictor as bpredictor
+from object_detection.core import class_predictor as cpredictor
 from object_detection.core import model
 from object_detection.core import standard_fields as fields
 from object_detection.core import target_assigner
@@ -119,6 +120,7 @@ class SSDMetaArch(model.DetectionModel):
                localization_loss_weight,
                normalize_loss_by_num_matches,
                hard_example_miner,
+               class_predictor,
                add_summaries=True):
     """SSDMetaArch Constructor.
 
@@ -162,6 +164,8 @@ class SSDMetaArch(model.DetectionModel):
     super(SSDMetaArch, self).__init__(num_classes=box_predictor.num_classes)
     self._is_training = is_training
 
+    self._multi_task_labels_dict = class_predictor.labels_dict if class_predictor else None
+
     # Needed for fine-tuning from classification checkpoints whose
     # variables do not have the feature extractor scope.
     self._extract_features_scope = 'FeatureExtractor'
@@ -177,13 +181,17 @@ class SSDMetaArch(model.DetectionModel):
     # TODO: handle agnostic mode and positive/negative class weights
     unmatched_cls_target = None
     unmatched_cls_target = tf.constant([1] + self.num_classes * [0], tf.float32)
+    unmatched_mtl_cls_target = {}
+    for label, num_classes in self._multi_task_labels_dict.items():
+        unmatched_mtl_cls_target[label] = tf.constant(num_classes * [0], tf.float32)
     self._target_assigner = target_assigner.TargetAssigner(
         self._region_similarity_calculator,
         self._matcher,
         self._box_coder,
         positive_class_weight=1.0,
         negative_class_weight=1.0,
-        unmatched_cls_target=unmatched_cls_target)
+        unmatched_cls_target=unmatched_cls_target,
+        unmatched_mtl_cls_target=unmatched_mtl_cls_target)
 
     self._classification_loss = classification_loss
     self._localization_loss = localization_loss
@@ -197,7 +205,12 @@ class SSDMetaArch(model.DetectionModel):
     self._score_conversion_fn = score_conversion_fn
 
     self._anchors = None
+    self._class_predictor = class_predictor
     self._add_summaries = add_summaries
+
+  @property
+  def multi_task_labels_dict(self):
+      return self._multi_task_labels_dict
 
   @property
   def anchors(self):
@@ -270,13 +283,54 @@ class SSDMetaArch(model.DetectionModel):
         im_width=image_shape[2])
     (box_encodings, class_predictions_with_background
     ) = self._add_box_predictions_to_feature_maps(feature_maps)
+    multi_task_label_class_predictions_dict = None
+    if self._class_predictor:
+        multi_task_label_class_predictions_dict = self._add_class_predictions_to_feature_maps(feature_maps)
     predictions_dict = {
         'box_encodings': box_encodings,
         'class_predictions_with_background': class_predictions_with_background,
+        'multi_task_label_class_predictions' : multi_task_label_class_predictions_dict,
         'feature_maps': feature_maps,
         'anchors': self._anchors.get()
     }
     return predictions_dict
+
+  def _add_class_predictions_to_feature_maps(self, feature_maps):
+    """Add class predictors if using multi-task-labels
+       Args:
+        feature_maps: multi-resolution feature maps
+       Returns:
+        cls_predictions_dict: there is an entry in the dict for
+            each multi-task-label. For each entry it contains a concatenated list
+            of the predictors for that label at muiltiple resolutions.
+            Each value in the dict is 3-D tensor of shape [batch_size, num_anchors, num_classes]
+       RuntimeError: if the number of feature maps extracted via the
+            extract_features method does not match the length of the
+            num_anchors_per_locations list that was passed to the constructor.
+    """
+    num_anchors_per_location_list = (
+        self._anchor_generator.num_anchors_per_location())
+    if len(feature_maps) != len(num_anchors_per_location_list):
+      raise RuntimeError('the number of feature maps must match the '
+                         'length of self.anchors.NumAnchorsPerLocation().')
+
+    cls_predictions_lists_dict = {name: [] for name in self._multi_task_labels_dict.keys()}
+    for idx, (feature_map, num_anchors_per_location
+             ) in enumerate(zip(feature_maps, num_anchors_per_location_list)):
+
+      class_predictor_scope = 'ClassPredictor_{}'.format(idx)
+      class_predictions = self._class_predictor.predict(feature_map,
+                                                        num_anchors_per_location,
+                                                        class_predictor_scope)
+      cls_predictions_dict = class_predictions[cpredictor.MULTI_TASK_LABEL_CLASS_PREDICTIONS]
+
+      for label, prediction in cls_predictions_dict.items():
+        cls_predictions_lists_dict[label].append(prediction)
+
+    cls_predictions_dict = {}
+    for label, predictions in cls_predictions_lists_dict.items():
+      cls_predictions_dict[label] = tf.concat(predictions, 1)
+    return cls_predictions_dict
 
   def _add_box_predictions_to_feature_maps(self, feature_maps):
     """Adds box predictors to each feature map and returns concatenated results.
@@ -457,9 +511,10 @@ class SSDMetaArch(model.DetectionModel):
             label.
       """
       (batch_cls_targets, batch_cls_weights, batch_reg_targets,
-       batch_reg_weights, match_list) = self._assign_targets(
+       batch_reg_weights, batch_cls_mtl_targets_dict, batch_cls_mtl_weights_dict, match_list) = self._assign_targets(
            self.groundtruth_lists(fields.BoxListFields.boxes),
            self.groundtruth_lists(fields.BoxListFields.classes),
+           self.groundtruth_lists(fields.BoxListFields.multi_task_labels_classes),
            keypoints)
       if self._add_summaries:
         self._summarize_input(
@@ -475,10 +530,17 @@ class SSDMetaArch(model.DetectionModel):
           prediction_dict['class_predictions_with_background'],
           batch_cls_targets,
           weights=batch_cls_weights)
+      cls_mtl_losses_dict = {}
+
+      for label in self._multi_task_labels_dict.keys():
+          cls_mtl_losses_dict[label] = self._classification_loss(
+            prediction_dict['multi_task_label_class_predictions'][label],
+            batch_cls_mtl_targets_dict[label],
+            weights=batch_cls_mtl_weights_dict[label])
       """Handle Multi-Task losses separately from the loss associated with localization"""
       if self._hard_example_miner:
-        (localization_loss, classification_loss) = self._apply_hard_mining(
-            location_losses, cls_losses, prediction_dict, match_list)
+        (localization_loss, classification_loss, classification_mtl_loss_dict) = self._apply_hard_mining(
+            location_losses, cls_losses, cls_mtl_losses_dict, prediction_dict, match_list)
         if self._add_summaries:
           self._hard_example_miner.summarize()
       else:
@@ -502,10 +564,15 @@ class SSDMetaArch(model.DetectionModel):
       with tf.name_scope('classification_loss'):
         classification_loss = ((self._classification_loss_weight / normalizer) *
                                classification_loss)
+      with tf.name_scope('multi_task_label_classification_loss'):
+          multi_task_label_classification_loss = tf.reduce_sum([
+            (self._classification_loss_weight / normalizer) *
+                cls_mtl_losses_dict[label]])
 
       loss_dict = {
           'localization_loss': localization_loss,
-          'classification_loss': classification_loss
+          'classification_loss': classification_loss,
+          'multi_task_label_classification_loss': multi_task_label_classification_loss
       }
     return loss_dict
 
@@ -522,6 +589,7 @@ class SSDMetaArch(model.DetectionModel):
                                               'NegativeAnchorLossCDF')
 
   def _assign_targets(self, groundtruth_boxes_list, groundtruth_classes_list,
+                      groundtruth_multi_task_labels_dict=None,
                       groundtruth_keypoints_list=None):
     """Assign groundtruth targets.
 
@@ -560,13 +628,15 @@ class SSDMetaArch(model.DetectionModel):
         tf.pad(one_hot_encoding, [[0, 0], [1, 0]], mode='CONSTANT')
         for one_hot_encoding in groundtruth_classes_list
     ]
+
     if groundtruth_keypoints_list is not None:
       for boxlist, keypoints in zip(
           groundtruth_boxlists, groundtruth_keypoints_list):
         boxlist.add_field(fields.BoxListFields.keypoints, keypoints)
     return target_assigner.batch_assign_targets(
         self._target_assigner, self.anchors, groundtruth_boxlists,
-        groundtruth_classes_with_background_list)
+        groundtruth_classes_with_background_list,
+        groundtruth_multi_task_labels_dict)
 
   def _summarize_input(self, groundtruth_boxes_list, match_list):
     """Creates tensorflow summaries for the input boxes and anchors.
@@ -601,7 +671,7 @@ class SSDMetaArch(model.DetectionModel):
     tf.summary.scalar('Input/AvgNumIgnoredAnchorsPerImage',
                       tf.reduce_mean(tf.to_float(ignored_anchors_per_image)))
 
-  def _apply_hard_mining(self, location_losses, cls_losses, prediction_dict,
+  def _apply_hard_mining(self, location_losses, cls_losses, cls_mtl_losses_dict, prediction_dict,
                          match_list):
     """Applies hard mining to anchorwise losses.
 
@@ -644,6 +714,7 @@ class SSDMetaArch(model.DetectionModel):
     return self._hard_example_miner(
         location_losses=location_losses,
         cls_losses=cls_losses,
+        cls_mtl_losses_dict=cls_mtl_losses_dict,
         decoded_boxlist_list=decoded_boxlist_list,
         match_list=match_list)
 

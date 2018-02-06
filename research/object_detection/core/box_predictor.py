@@ -564,4 +564,3 @@ class ConvolutionalBoxPredictor(BoxPredictor):
     return {BOX_ENCODINGS: box_encodings,
             CLASS_PREDICTIONS_WITH_BACKGROUND:
             class_predictions_with_background}
-"""Make a separate class for multi-task"""

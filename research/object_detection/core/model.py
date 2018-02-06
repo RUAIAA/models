@@ -209,7 +209,8 @@ class DetectionModel(object):
                           groundtruth_boxes_list,
                           groundtruth_classes_list,
                           groundtruth_masks_list=None,
-                          groundtruth_keypoints_list=None):
+                          groundtruth_keypoints_list=None,
+                          groundtruth_multi_task_labels_classes_dict=None):
     """Provide groundtruth tensors.
 
     Args:
@@ -230,6 +231,9 @@ class DetectionModel(object):
         shape [num_boxes, num_keypoints, 2] containing keypoints.
         Keypoints are assumed to be provided in normalized coordinates and
         missing keypoints should be encoded as NaN.
+      groundtruth_multi_task_labels_classes_dict: a dict of lists of 2-D tf.float32 one-hot (or k-hot)
+        tensors of shape [num_boxes, num_classes] containing the class targets for multi-task learning, or
+        learning more than one label of an object
     """
     self._groundtruth_lists[fields.BoxListFields.boxes] = groundtruth_boxes_list
     self._groundtruth_lists[
@@ -240,6 +244,8 @@ class DetectionModel(object):
     if groundtruth_keypoints_list:
       self._groundtruth_lists[
           fields.BoxListFields.keypoints] = groundtruth_keypoints_list
+    self._groundtruth_lists[
+        fields.BoxListFields.multi_task_labels_classes] = groundtruth_multi_task_labels_classes_dict
 
   @abstractmethod
   def restore_map(self, from_detection_checkpoint=True):

@@ -479,6 +479,7 @@ class HardExampleMiner(object):
   def __call__(self,
                location_losses,
                cls_losses,
+               cls_mtl_losses_dict,
                decoded_boxlist_list,
                match_list=None):
     """Computes localization and classification losses after hard mining.
@@ -512,8 +513,11 @@ class HardExampleMiner(object):
     """
     mined_location_losses = []
     mined_cls_losses = []
+    mined_cls_mtl_losses_dict = {label: [] for label in cls_mtl_losses_dict.keys()}
+
     location_losses = tf.unstack(location_losses)
     cls_losses = tf.unstack(cls_losses)
+    cls_mtl_losses_list_dict = { label: tf.unstack(loss) for label, loss in cls_mtl_losses_dict.items()}
     num_images = len(decoded_boxlist_list)
     if not match_list:
       match_list = num_images * [None]
@@ -553,12 +557,16 @@ class HardExampleMiner(object):
           tf.reduce_sum(tf.gather(location_losses[ind], selected_indices)))
       mined_cls_losses.append(
           tf.reduce_sum(tf.gather(cls_losses[ind], selected_indices)))
+      for label in cls_mtl_losses_dict.keys():
+          mined_cls_mtl_losses_dict[label].append(
+            tf.reduce_sum(tf.gather(cls_mtl_losses_list_dict[label][ind], selected_indices)))
     location_loss = tf.reduce_sum(tf.stack(mined_location_losses))
     cls_loss = tf.reduce_sum(tf.stack(mined_cls_losses))
+    cls_mtl_losses_dict = {label: tf.reduce_sum(tf.stack(loss)) for label, loss in mined_cls_mtl_losses_dict.items()}
     if match and self._max_negatives_per_positive:
       self._num_positives_list = num_positives_list
       self._num_negatives_list = num_negatives_list
-    return (location_loss, cls_loss)
+    return (location_loss, cls_loss, cls_mtl_losses_dict)
 
   def summarize(self):
     """Summarize the number of positives and negatives after mining."""

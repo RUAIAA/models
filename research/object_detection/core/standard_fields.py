@@ -79,7 +79,7 @@ class InputDataFields(object):
   groundtruth_keypoints = 'groundtruth_keypoints'
   groundtruth_keypoint_visibilities = 'groundtruth_keypoint_visibilities'
   groundtruth_label_scores = 'groundtruth_label_scores'
-
+  groundtruth_multi_task_labels = 'groundtruth_multi_task_labels/'
 
 class DetectionResultFields(object):
   """Naming converntions for storing the output of the detector.
@@ -130,6 +130,7 @@ class BoxListFields(object):
   boundaries = 'boundaries'
   keypoints = 'keypoints'
   keypoint_heatmaps = 'keypoint_heatmaps'
+  multi_task_labels_classes = 'multi_task_labels_classes'
 
 
 class TfExampleFields(object):

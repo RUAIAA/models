@@ -1,0 +1,49 @@
+syntax = "proto2";
+
+package object_detection.protos;
+
+import "object_detection/protos/hyperparams.proto";
+
+
+// Configuration proto for class predictor
+message ClassPredictor {
+    oneof class_predictor_oneof {
+        MultiTaskLabelConvolutionalClassPredictor multi_task_label_convolutional_class_predictor = 1;
+    }
+}
+
+// Configuration proto for MultiTaskLabel box predictor.
+message MultiTaskLabelConvolutionalClassPredictor {
+  // Hyperparameters for convolution ops used in the box predictor.
+  optional Hyperparams conv_hyperparams = 1;
+
+  // Minumum feature depth prior to predicting box encodings and class
+  // predictions.
+  //optional int32 min_depth = 2 [default = 0];
+
+  // Maximum feature depth prior to predicting box encodings and class
+  // predictions. If max_depth is set to 0, no additional feature map will be
+  // inserted before location and class predictions.
+  //optional int32 max_depth = 3 [default = 0];
+
+  // Number of the additional conv layers before the predictor.
+  optional int32 num_layers_before_predictor = 4 [default = 0];
+
+  // Whether to use dropout for class prediction.
+  optional bool use_dropout = 5 [default = true];
+
+  // Keep probability for dropout
+  optional float dropout_keep_probability = 6 [default = 0.8];
+
+  // Size of final convolution kernel. If the spatial resolution of the feature
+  // map is smaller than the kernel size, then the kernel size is set to
+  // min(feature_width, feature_height).
+  optional int32 kernel_size = 7 [default = 1];
+
+
+  // Whether to apply sigmoid to the output of class predictions.
+  // TODO: Do we need this since we have a post processing module.?
+  optional bool apply_sigmoid_to_scores = 9 [default = false];
+
+  optional float class_prediction_bias_init = 10 [default = 0.0];
+}

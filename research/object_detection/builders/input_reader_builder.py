@@ -69,7 +69,8 @@ def build(input_reader_config):
       label_map_proto_file = input_reader_config.label_map_path
     decoder = tf_example_decoder.TfExampleDecoder(
         load_instance_masks=input_reader_config.load_instance_masks,
-        label_map_proto_file=label_map_proto_file)
+        label_map_proto_file=label_map_proto_file,
+        multi_task_label=input_reader_config.multi_task_label)
     return decoder.decode(string_tensor)
 
   raise ValueError('Unsupported input_reader_config.')

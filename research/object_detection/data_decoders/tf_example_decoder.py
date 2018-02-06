@@ -33,7 +33,8 @@ class TfExampleDecoder(data_decoder.DataDecoder):
   def __init__(self,
                load_instance_masks=False,
                label_map_proto_file=None,
-               use_display_name=False):
+               use_display_name=False,
+               multi_task_label=[]):
     """Constructor sets keys_to_features and items_to_handlers.
 
     Args:
@@ -84,6 +85,10 @@ class TfExampleDecoder(data_decoder.DataDecoder):
         'image/object/group_of':
             tf.VarLenFeature(tf.int64),
     }
+
+    for label in multi_task_label:
+        self.keys_to_features['image/object/multi_task_label/class/label/'+label] = \
+            tf.VarLenFeature(tf.int64)
     self.items_to_handlers = {
         fields.InputDataFields.image: slim_example_decoder.Image(
             image_key='image/encoded', format_key='image/format', channels=3),
@@ -106,6 +111,13 @@ class TfExampleDecoder(data_decoder.DataDecoder):
         fields.InputDataFields.groundtruth_group_of: (
             slim_example_decoder.Tensor('image/object/group_of'))
     }
+
+    for label in multi_task_label:
+        #fields.InputDataFields.groundtruth_multi_task_labels_dict[label.name] = label.num_classes
+        #using string concat removes the need for a dict, which reduces the tensor_dict embedding
+        #this allows us to use the batcher which won't accept dictionary embeddings in the input
+        self.items_to_handlers[fields.InputDataFields.groundtruth_multi_task_labels+label] = \
+            slim_example_decoder.Tensor('image/object/multi_task_label/class/label/'+label)
     if load_instance_masks:
       self.keys_to_features['image/object/mask'] = tf.VarLenFeature(tf.float32)
       self.items_to_handlers[

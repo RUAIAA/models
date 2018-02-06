@@ -23,6 +23,8 @@ from object_detection.builders import losses_builder
 from object_detection.builders import matcher_builder
 from object_detection.builders import post_processing_builder
 from object_detection.builders import region_similarity_calculator_builder as sim_calc
+from object_detection.builders import class_predictor_builder
+from object_detection.core import class_predictor
 from object_detection.core import box_predictor
 from object_detection.meta_architectures import faster_rcnn_meta_arch
 from object_detection.meta_architectures import rfcn_meta_arch
@@ -36,6 +38,7 @@ from object_detection.models.ssd_inception_v2_feature_extractor import SSDIncept
 from object_detection.models.ssd_inception_v3_feature_extractor import SSDInceptionV3FeatureExtractor
 from object_detection.models.ssd_mobilenet_v1_feature_extractor import SSDMobileNetV1FeatureExtractor
 from object_detection.protos import model_pb2
+
 
 # A map of names to SSD feature extractors.
 SSD_FEATURE_EXTRACTOR_CLASS_MAP = {
@@ -145,6 +148,14 @@ def _build_ssd_model(ssd_config, is_training):
   ssd_box_predictor = box_predictor_builder.build(hyperparams_builder.build,
                                                   ssd_config.box_predictor,
                                                   is_training, num_classes)
+
+  if ssd_config.multi_task_label:
+      labels_dict = {label.name: label.num_classes for label in ssd_config.multi_task_label}
+      ssd_class_predictor = class_predictor_builder.build(hyperparams_builder.build,
+                                                          ssd_config.class_predictor,
+                                                          is_training, labels_dict)
+  else:
+      ssd_class_predictor = None
   anchor_generator = anchor_generator_builder.build(
       ssd_config.anchor_generator)
   image_resizer_fn = image_resizer_builder.build(ssd_config.image_resizer)
@@ -171,7 +182,8 @@ def _build_ssd_model(ssd_config, is_training):
       classification_weight,
       localization_weight,
       normalize_loss_by_num_matches,
-      hard_example_miner)
+      hard_example_miner,
+      ssd_class_predictor)
 
 
 def _build_faster_rcnn_feature_extractor(

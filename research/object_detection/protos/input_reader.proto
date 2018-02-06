@@ -45,6 +45,8 @@ message InputReader {
     TFRecordInputReader tf_record_input_reader = 8;
     ExternalInputReader external_input_reader = 9;
   }
+
+  repeated string multi_task_label = 10;
 }
 
 // An input reader that reads TF Example protos from local TFRecord files.

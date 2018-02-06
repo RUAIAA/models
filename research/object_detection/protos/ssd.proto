@@ -10,7 +10,8 @@ import "object_detection/protos/matcher.proto";
 import "object_detection/protos/losses.proto";
 import "object_detection/protos/post_processing.proto";
 import "object_detection/protos/region_similarity_calculator.proto";
-
+import "object_detection/protos/multi_task_label.proto";
+import "object_detection/protos/class_predictor.proto";
 // Configuration for Single Shot Detection (SSD) models.
 message Ssd {
 
@@ -47,6 +48,11 @@ message Ssd {
 
   // Loss configuration for training.
   optional Loss loss = 11;
+
+  // Additional labels for SSD to classify in a multi-task manner.
+  repeated MultiTaskLabel multi_task_label = 12;
+
+  optional ClassPredictor class_predictor = 14;
 }
 
 

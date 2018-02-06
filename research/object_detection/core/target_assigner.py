@@ -49,7 +49,7 @@ class TargetAssigner(object):
 
   def __init__(self, similarity_calc, matcher, box_coder,
                positive_class_weight=1.0, negative_class_weight=1.0,
-               unmatched_cls_target=None):
+               unmatched_cls_target=None, unmatched_mtl_cls_target=None):
     """Construct Object Detection Target Assigner.
 
     Args:
@@ -88,12 +88,13 @@ class TargetAssigner(object):
       self._unmatched_cls_target = tf.constant([0], tf.float32)
     else:
       self._unmatched_cls_target = unmatched_cls_target
+    self._unmatched_mtl_cls_target = unmatched_mtl_cls_target
 
   @property
   def box_coder(self):
     return self._box_coder
 
-  def assign(self, anchors, groundtruth_boxes, groundtruth_labels=None,
+  def assign(self, anchors, groundtruth_boxes, groundtruth_labels=None,groundtruth_multi_task_labels_dict=None,
              **params):
     """Assign classification and regression targets to each anchor.
 
@@ -158,9 +159,13 @@ class TargetAssigner(object):
                                                     match)
       cls_targets = self._create_classification_targets(groundtruth_labels,
                                                         match)
+      cls_mtl_targets_dict = self._create_mtl_classification_targets(groundtruth_multi_task_labels_dict,
+                                                                     match)
+
       reg_weights = self._create_regression_weights(match)
       cls_weights = self._create_classification_weights(
           match, self._positive_class_weight, self._negative_class_weight)
+      cls_mtl_weights_dict = {label:self._create_regression_weights(match) for label in groundtruth_multi_task_labels_dict.keys()}
 
       num_anchors = anchors.num_boxes_static()
       if num_anchors is not None:
@@ -168,8 +173,12 @@ class TargetAssigner(object):
         cls_targets = self._reset_target_shape(cls_targets, num_anchors)
         reg_weights = self._reset_target_shape(reg_weights, num_anchors)
         cls_weights = self._reset_target_shape(cls_weights, num_anchors)
+        for label, targets in cls_mtl_targets_dict.items():
+            cls_mtl_targets_dict[label] = self._reset_target_shape(targets, num_anchors)
+        for label, weights in cls_mtl_weights_dict.items():
+            cls_mtl_weights_dict[label] = self._reset_target_shape(weights, num_anchors)
 
-    return cls_targets, cls_weights, reg_targets, reg_weights, match
+    return cls_targets, cls_weights, reg_targets, reg_weights, cls_mtl_targets_dict, cls_mtl_weights_dict, match
 
   def _reset_target_shape(self, target, num_anchors):
     """Sets the static shape of the target.
@@ -265,7 +274,7 @@ class TargetAssigner(object):
         [matched_cls_targets, unmatched_ignored_cls_targets])
     return cls_targets
 
-  def _create_nonbackground_classification_targets(self, groundtruth_labels, match):
+  def _create_mtl_classification_targets(self, groundtruth_multi_task_labels_dict, match):
       """Creates classification target for secondary classifications that aren't associated
          with the background class
          Args:
@@ -279,9 +288,27 @@ class TargetAssigner(object):
            cls_targets: a float32 tensor with shape [num_anchors, d_1, d_2 ... d_k],
              where the subshape [d_1, ..., d_k] is compatible with groundtruth_labels
              which has shape [num_gt_boxes, d_1, d_2, ... d_k].
-    """
-    pass
-    """similar to regression targets except for the classes that aren't the background"""
+      """
+      matched_anchor_indices = match.matched_column_indices()
+      unmatched_ignored_anchor_indices = (match.
+                                            unmatched_or_ignored_column_indices())
+      matched_gt_indices = match.matched_row_indices()
+      cls_targets = {}
+      #for each mtl we check for unmatched anchors and add a one-hot tensor of all zeroes
+      for label, gt in groundtruth_multi_task_labels_dict.items():
+
+            matched_cls_targets = tf.gather(gt, matched_gt_indices)
+
+            ones = self._unmatched_mtl_cls_target[label].shape.ndims * [1]
+            unmatched_ignored_cls_targets = tf.tile(
+                tf.expand_dims(self._unmatched_mtl_cls_target[label], 0),
+                tf.stack([tf.size(unmatched_ignored_anchor_indices)] + ones))
+
+            cls_targets[label] = tf.dynamic_stitch(
+                [matched_anchor_indices, unmatched_ignored_anchor_indices],
+                [matched_cls_targets, unmatched_ignored_cls_targets])
+      return cls_targets
+
   def _create_regression_weights(self, match):
     """Set regression weight for each anchor.
 
@@ -408,7 +435,8 @@ def create_target_assigner(reference, stage=None,
 def batch_assign_targets(target_assigner,
                          anchors_batch,
                          gt_box_batch,
-                         gt_class_targets_batch):
+                         gt_class_targets_batch,
+                         gt_mtl_class_targets_batch_dict):
   """Batched assignment of classification and regression targets.
 
   Args:
@@ -453,20 +481,32 @@ def batch_assign_targets(target_assigner,
   cls_weights_list = []
   reg_targets_list = []
   reg_weights_list = []
+
+  cls_mtl_targets_list_dict = {label: [] for label in gt_mtl_class_targets_batch_dict[0].keys()}
+  cls_mtl_weights_list_dict = {label: [] for label in gt_mtl_class_targets_batch_dict[0].keys()}
   match_list = []
-  for anchors, gt_boxes, gt_class_targets in zip(
-      anchors_batch, gt_box_batch, gt_class_targets_batch):
+  for anchors, gt_boxes, gt_class_targets, gt_mtl_class_targets_dict in zip(
+      anchors_batch, gt_box_batch, gt_class_targets_batch,gt_mtl_class_targets_batch_dict):
     (cls_targets, cls_weights, reg_targets,
-     reg_weights, match) = target_assigner.assign(
-         anchors, gt_boxes, gt_class_targets)
+     reg_weights, cls_mtl_targets_dict, cls_mtl_weights_dict, match) = target_assigner.assign(
+         anchors, gt_boxes, gt_class_targets, gt_mtl_class_targets_dict)
     cls_targets_list.append(cls_targets)
     cls_weights_list.append(cls_weights)
     reg_targets_list.append(reg_targets)
     reg_weights_list.append(reg_weights)
+    for label, target in cls_mtl_targets_dict.items():
+        cls_mtl_targets_list_dict[label].append(cls_mtl_targets_dict[label])
+        cls_mtl_weights_list_dict[label].append(cls_mtl_weights_dict[label])
     match_list.append(match)
   batch_cls_targets = tf.stack(cls_targets_list)
   batch_cls_weights = tf.stack(cls_weights_list)
   batch_reg_targets = tf.stack(reg_targets_list)
   batch_reg_weights = tf.stack(reg_weights_list)
+  batch_cls_mtl_targets_dict = {}
+  batch_cls_mtl_weights_dict = {}
+  for label, targets_list in cls_mtl_targets_list_dict.items():
+      batch_cls_mtl_targets_dict[label] = tf.stack(targets_list)
+  for label, weights_list in cls_mtl_weights_list_dict.items():
+      batch_cls_mtl_weights_dict[label] = tf.stack(weights_list)
   return (batch_cls_targets, batch_cls_weights, batch_reg_targets,
-          batch_reg_weights, match_list)
+          batch_reg_weights, batch_cls_mtl_targets_dict, batch_cls_mtl_weights_dict, match_list)

@@ -1,0 +1,9 @@
+//Used for adding a multi-task label for Detector to classify
+// along with the one associated with the boxcoder.
+// This is will be treated as a combination of regression and classification (i.e.)
+// classification where negatives are not backpropagated.
+
+message MultiTaskLabel {
+    required string name = 1;
+    required int32 num_classes=2;
+}

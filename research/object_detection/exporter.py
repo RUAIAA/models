@@ -102,6 +102,7 @@ def freeze_graph_with_def_protos(
 
       variable_names_blacklist = (variable_names_blacklist.split(',') if
                                   variable_names_blacklist else None)
+
       output_graph_def = graph_util.convert_variables_to_constants(
           sess,
           input_graph_def,
@@ -233,11 +234,16 @@ def _add_output_tensor_nodes(postprocessed_tensors,
   classes = postprocessed_tensors.get('detection_classes') + label_id_offset
   masks = postprocessed_tensors.get('detection_masks')
   num_detections = postprocessed_tensors.get('num_detections')
+  mtl_classes = postprocessed_tensors.get('detection_mtl_classes')
+  a=[n.name for n in tf.get_default_graph().as_graph_def().node]
+
   outputs = {}
   outputs['detection_boxes'] = tf.identity(boxes, name='detection_boxes')
   outputs['detection_scores'] = tf.identity(scores, name='detection_scores')
   outputs['detection_classes'] = tf.identity(classes, name='detection_classes')
   outputs['num_detections'] = tf.identity(num_detections, name='num_detections')
+  for label, prediction in mtl_classes.items():
+    outputs[label] = tf.identity(prediction, name=label)
   if masks is not None:
     outputs['detection_masks'] = tf.identity(masks, name='detection_masks')
   for output_key in outputs:
@@ -288,7 +294,11 @@ def _write_saved_model(saved_model_path,
           'inputs': tf.saved_model.utils.build_tensor_info(inputs)}
       tensor_info_outputs = {}
       for k, v in outputs.items():
-        tensor_info_outputs[k] = tf.saved_model.utils.build_tensor_info(v)
+        if isinstance(v, dict):
+            for k1, v1 in v.items():
+                tensor_info_outputs[k1] = tf.saved_model.utils.build_tensor_info(v1)
+            else:
+                tensor_info_outputs[k] = tf.saved_model.utils.build_tensor_info(v)
 
       detection_signature = (
           tf.saved_model.signature_def_utils.build_signature_def(

@@ -111,4 +111,18 @@ class SSDMobileNetV1FeatureExtractor(ssd_meta_arch.SSDFeatureExtractor):
                 insert_1x1_conv=True,
                 image_features=image_features)
 
-    return feature_maps.values()
+            with tf.variable_scope("ClassPredictor_MRes"):
+                feature_map_layout = {
+                    'from_layer': ['Conv2d_11_pointwise', '', '', '',
+                                   '', ''],
+                    'layer_depth': [-1, 1024, 512, 256, 256, 128],
+                }
+                feature_maps2 = feature_map_generators.multi_resolution_feature_maps(
+                    feature_map_layout=feature_map_layout,
+                    depth_multiplier=self._depth_multiplier,
+                    min_depth=self._min_depth,
+                    insert_1x1_conv=True,
+                    image_features=image_features)
+
+
+    return {"shape": feature_maps.values(), "alphanumeric": feature_maps2.values() }

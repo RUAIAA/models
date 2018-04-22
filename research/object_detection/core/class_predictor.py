@@ -55,7 +55,13 @@ class MultiTaskLabelConvolutionalClassPredictor(object):
                  slim.arg_scope([slim.dropout], is_training=self._is_training):
               with slim.arg_scope([slim.conv2d], activation_fn=None,
                                     normalizer_fn=None, normalizer_params=None):
+                # Add additional conv layers before the class predictor.
+                features_depth = static_shape.get_depth(image_features.get_shape())
+                #depth = max(min(features_depth, self._max_depth), self._min_depth)
                 for label_name, num_classes in self._labels_dict.items():
+                    #if depth > 0 and self._num_layers_before_predictor > 0 :
+                    #    net = slim.conv2d(
+                    #        net, depth, [1,1], scope=('Conv2d_%d_1x1_%d_')%(i, depth)+label_name)
                     if self._use_dropout:
                         net = slim.dropout(net, keep_prob=self._dropout_keep_prob)
                     class_predictions = slim.conv2d(

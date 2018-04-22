@@ -449,6 +449,7 @@ def visualize_boxes_and_labels_on_image_array(image,
         if not agnostic_mode:
           if classes[i] in category_index.keys():
             class_name = category_index[classes[i]]['name']
+            print(class_name)
           else:
             class_name = 'N/A'
           display_str = '{}: {}%'.format(

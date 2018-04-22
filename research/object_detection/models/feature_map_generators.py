@@ -128,6 +128,7 @@ def multi_resolution_feature_maps(feature_map_layout, depth_multiplier,
       base_from_layer = from_layer
       feature_map_keys.append(from_layer)
     else:
+      #import pdb;pdb.set_trace()
       pre_layer = feature_maps[-1]
       intermediate_layer = pre_layer
       if insert_1x1_conv:

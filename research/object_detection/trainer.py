@@ -265,6 +265,7 @@ def train(create_tensor_dict_fn, create_model_fn, train_config, master, task,
       init_fn = initializer_fn
 
     with tf.device(deploy_config.optimizer_device()):
+
       total_loss, grads_and_vars = model_deploy.optimize_clones(
           clones, training_optimizer, regularization_losses=None)
       total_loss = tf.check_numerics(total_loss, 'LossTensor is inf or nan.')
@@ -288,8 +289,15 @@ def train(create_tensor_dict_fn, create_model_fn, train_config, master, task,
           grads_and_vars = slim.learning.clip_gradient_norms(
               grads_and_vars, train_config.gradient_clipping_by_norm)
 
+      train_vars = []
+      for variable in grads_and_vars:
+          #print(variable[0])
+          if "ClassPredictor" in variable[0].op.name:
+              train_vars.append(variable)
+      print(train_vars)
+
       # Create gradient updates.
-      grad_updates = training_optimizer.apply_gradients(grads_and_vars,
+      grad_updates = training_optimizer.apply_gradients(train_vars,
                                                         global_step=global_step)
       update_ops.append(grad_updates)
 

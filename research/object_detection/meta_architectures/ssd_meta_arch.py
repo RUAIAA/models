@@ -275,6 +275,8 @@ class SSDMetaArch(model.DetectionModel):
                            [preprocessed_inputs]):
       feature_maps = self._feature_extractor.extract_features(
           preprocessed_inputs)
+    alphanumeric = feature_maps['alphanumeric']
+    feature_maps = feature_maps['shape']
     feature_map_spatial_dims = self._get_feature_map_spatial_dims(feature_maps)
     image_shape = tf.shape(preprocessed_inputs)
     self._anchors = self._anchor_generator.generate(
@@ -285,7 +287,7 @@ class SSDMetaArch(model.DetectionModel):
     ) = self._add_box_predictions_to_feature_maps(feature_maps)
     multi_task_label_class_predictions_dict = None
     if self._class_predictor:
-        multi_task_label_class_predictions_dict = self._add_class_predictions_to_feature_maps(feature_maps)
+        multi_task_label_class_predictions_dict = self._add_class_predictions_to_feature_maps(alphanumeric)
     predictions_dict = {
         'box_encodings': box_encodings,
         'class_predictions_with_background': class_predictions_with_background,
@@ -449,6 +451,7 @@ class SSDMetaArch(model.DetectionModel):
     with tf.name_scope('Postprocessor'):
       box_encodings = prediction_dict['box_encodings']
       class_predictions = prediction_dict['class_predictions_with_background']
+      mtl_class_predictions = prediction_dict['multi_task_label_class_predictions']
       detection_boxes, detection_keypoints = self._batch_decode(box_encodings)
       detection_boxes = tf.expand_dims(detection_boxes, axis=2)
 
@@ -462,20 +465,25 @@ class SSDMetaArch(model.DetectionModel):
       if detection_keypoints is not None:
         additional_fields = {
             fields.BoxListFields.keypoints: detection_keypoints}
+      additional_fields = mtl_class_predictions
       (nmsed_boxes, nmsed_scores, nmsed_classes, _, nmsed_additional_fields,
        num_detections) = self._non_max_suppression_fn(
            detection_boxes,
            detection_scores,
            clip_window=clip_window,
            additional_fields=additional_fields)
+
       detection_dict = {'detection_boxes': nmsed_boxes,
                         'detection_scores': nmsed_scores,
                         'detection_classes': nmsed_classes,
-                        'num_detections': tf.to_float(num_detections)}
+                        'num_detections': tf.to_float(num_detections),\
+                        'detection_mtl_classes': nmsed_additional_fields}
+      """
       if (nmsed_additional_fields is not None and
           fields.BoxListFields.keypoints in nmsed_additional_fields):
         detection_dict['detection_keypoints'] = nmsed_additional_fields[
             fields.BoxListFields.keypoints]
+      """
       return detection_dict
 
   def loss(self, prediction_dict, scope=None):
@@ -768,9 +776,10 @@ class SSDMetaArch(model.DetectionModel):
       A dict mapping variable names (to load from a checkpoint) to variables in
       the model graph.
     """
+
     variables_to_restore = {}
     for variable in tf.global_variables():
-      if variable.op.name.startswith(self._extract_features_scope):
+      if variable.op.name.startswith(self._extract_features_scope) or variable.op.name.startswith("BoxPredictor"):
         var_name = variable.op.name
         if not from_detection_checkpoint:
           var_name = (re.split('^' + self._extract_features_scope + '/',
